@@ -1,12 +1,48 @@
-# Agent Bob run-state internals — not source of truth, never committed.
-.bob/
+# Unreal Engine generated files
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
 
-node_modules/
-.env
-.env.local
+# Visual Studio / Rider / IDE files
+.vs/
+.vscode/
+.idea/
+*.sln
+*.slnx
+*.suo
+*.user
+*.userosscache
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.VC.opendb
+*.rsuser
 
-# Per-project image uploads — working data, not source.
-uploads/
+# Build and compiler output
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.tlog
+*.log
+*.tmp
+*.cache
 
-Thumbs.db
+# Unreal generated project files
+*.code-workspace
+*.xcworkspace/
+*.xcodeproj/
+
+# Packaged builds and archives
+PackagedBuilds/
+Releases/
+*.pak
+*.utoc
+*.ucas
+
+# OS files
 .DS_Store
+Thumbs.db
+desktop.ini

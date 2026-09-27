@@ -1,0 +1,12 @@
+# Agent Bob run-state internals — not source of truth, never committed.
+.bob/
+
+node_modules/
+.env
+.env.local
+
+# Per-project image uploads — working data, not source.
+uploads/
+
+Thumbs.db
+.DS_Store

@@ -115,7 +115,7 @@ For manual editor work only (not for automated Blueprint creation — see Archit
 
 | Document | Purpose |
 |----------|---------|
-| [MCP/Index.md](MCP/Index.md) | All 51 toolsets, ~825 tools, organized by category |
+| `[agent-bob-techstack] ue5-mcp-toolsets/INDEX.md` (separate repo — moved out of olc-game in the OurLastChance split, see olc-migrate/MIGRATION-AUDIT.md) | All 51 toolsets, ~825 tools, organized by category |
 
 **Key UI-related toolsets:**
 - `UMGToolSet.UMGToolSet` — Create/compile UMG widget Blueprints (23 tools)

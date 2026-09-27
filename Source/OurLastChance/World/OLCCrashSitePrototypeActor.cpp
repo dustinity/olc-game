@@ -8,8 +8,8 @@
 
 namespace
 {
-	static const FName ColorParameterName(TEXT("Color"));
-	static const FName RoughnessParameterName(TEXT("Roughness"));
+	static const FName CrashColorParameterName(TEXT("Color"));
+	static const FName CrashRoughnessParameterName(TEXT("Roughness"));
 }
 
 AOLCCrashSitePrototypeActor::AOLCCrashSitePrototypeActor()
@@ -274,8 +274,8 @@ void AOLCCrashSitePrototypeActor::ConfigureMaterial(UInstancedStaticMeshComponen
 	}
 
 	UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(SourceMaterial, this);
-	DynamicMaterial->SetVectorParameterValue(ColorParameterName, Color);
-	DynamicMaterial->SetScalarParameterValue(RoughnessParameterName, Roughness);
+	DynamicMaterial->SetVectorParameterValue(CrashColorParameterName, Color);
+	DynamicMaterial->SetScalarParameterValue(CrashRoughnessParameterName, Roughness);
 	Component->SetMaterial(0, DynamicMaterial);
 }
 

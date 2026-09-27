@@ -16,8 +16,8 @@
 
 namespace
 {
-	static const FName ColorParameterName(TEXT("Color"));
-	static const FName RoughnessParameterName(TEXT("Roughness"));
+	static const FName PlanetColorParameterName(TEXT("Color"));
+	static const FName PlanetRoughnessParameterName(TEXT("Roughness"));
 }
 
 AOLCPlanetTerrainActor::AOLCPlanetTerrainActor()
@@ -199,7 +199,7 @@ void AOLCPlanetTerrainActor::UpdatePropColorsCrossfade(const FLinearColor& Block
 			DynamicMat = UMaterialInstanceDynamic::Create(BlockerProps->GetMaterial(0), this);
 			BlockerProps->SetMaterial(0, DynamicMat);
 		}
-		DynamicMat->SetVectorParameterValue(ColorParameterName, BlockerColor);
+		DynamicMat->SetVectorParameterValue(PlanetColorParameterName, BlockerColor);
 	}
 
 	if (PlantProps && PlantProps->GetMaterial(0))
@@ -214,7 +214,7 @@ void AOLCPlanetTerrainActor::UpdatePropColorsCrossfade(const FLinearColor& Block
 			FLinearColor(0.12f, 0.80f, 0.20f),
 			FLinearColor(0.30f, 0.60f, 0.25f),
 			CrossfadeProgress);
-		DynamicMat->SetVectorParameterValue(ColorParameterName, PlantColor);
+		DynamicMat->SetVectorParameterValue(PlanetColorParameterName, PlantColor);
 	}
 }
 
@@ -553,24 +553,24 @@ void AOLCPlanetTerrainActor::ApplyAtmosphere(const UOLCPlanetTerrainProfile* Pro
 	}
 
 	// Apply fog settings to world
-	for (TActorIterator<AExponentialHeightFog> It(GetWorld()); It; ++It)
+	TActorIterator<AExponentialHeightFog> It(GetWorld());
+	if (It)
 	{
 		if (UExponentialHeightFogComponent* FogComponent = (*It)->GetComponent())
 		{
 			FogComponent->SetFogDensity(FogDens);
 			FogComponent->SetFogInscatteringColor(FogCol);
 		}
-		break;
 	}
 
 	// Update directional light color if available
-	for (TActorIterator<ADirectionalLight> It(GetWorld()); It; ++It)
+	TActorIterator<ADirectionalLight> DirIt(GetWorld());
+	if (DirIt)
 	{
-		if (UDirectionalLightComponent* LightComponent = Cast<UDirectionalLightComponent>((*It)->GetLightComponent()))
+		if (UDirectionalLightComponent* LightComponent = Cast<UDirectionalLightComponent>((*DirIt)->GetLightComponent()))
 		{
 			LightComponent->SetLightColor(DirLightCol);
 		}
-		break;
 	}
 }
 
@@ -589,8 +589,8 @@ void AOLCPlanetTerrainActor::ConfigureMaterial(UInstancedStaticMeshComponent* Co
 	}
 
 	UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(SourceMat, this);
-	DynamicMaterial->SetVectorParameterValue(ColorParameterName, Color);
-	DynamicMaterial->SetScalarParameterValue(RoughnessParameterName, Roughness);
+	DynamicMaterial->SetVectorParameterValue(PlanetColorParameterName, Color);
+	DynamicMaterial->SetScalarParameterValue(PlanetRoughnessParameterName, Roughness);
 	Component->SetMaterial(0, DynamicMaterial);
 }
 

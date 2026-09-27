@@ -79,7 +79,7 @@ void AOLCUnitBase::SetCurrentHP(float NewHP)
 	CurrentHP = FMath::Clamp(NewHP, 0.0f, MaxHP);
 }
 
-void AOLCUnitBase::TakeDamage(float DamageAmount)
+void AOLCUnitBase::ApplyDamage(float DamageAmount)
 {
 	if (IsDead()) return;
 
@@ -176,7 +176,7 @@ void AOLCUnitBase::Attack(AActor* Target)
 
 	if (AOLCUnitBase* Enemy = Cast<AOLCUnitBase>(Target))
 	{
-		Enemy->TakeDamage(UnitData->AttackDamage);
+		Enemy->ApplyDamage(UnitData->AttackDamage);
 
 		UE_LOG(LogTemp, Verbose, TEXT("[OLC] Unit '%s' attacked '%s' for %.0f damage (range=%.0f)"),
 			*UnitData->DisplayName.ToString(),

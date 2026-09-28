@@ -1,0 +1,102 @@
+[
+  {
+    "name": "DA_Building_SolarArray",
+    "display_name": "Solar Array",
+    "category": 0,
+    "grid_size": [2.0, 2.0],
+    "build_cost": [
+      {"resource_type": "Energy",       "amount": 30.0},
+      {"resource_type": "ConstructionMaterial", "amount": 20.0}
+    ],
+    "power_consumption": -5.0,
+    "output_per_tick": [],
+    "tir_requirement": 1,
+    "description": "Generates energy from sunlight. Basic power source for base operations."
+  },
+  {
+    "name": "DA_Building_CampBarracks",
+    "display_name": "Camp Barracks",
+    "category": 2,
+    "grid_size": [2.0, 2.0],
+    "build_cost": [
+      {"resource_type": "ConstructionMaterial", "amount": 40.0},
+      {"resource_type": "Minerals",           "amount": 20.0}
+    ],
+    "power_consumption": 3.0,
+    "output_per_tick": [],
+    "tir_requirement": 1,
+    "description": "Unit training facility. +8 unit capacity."
+  },
+  {
+    "name": "DA_Building_HabitationModule",
+    "display_name": "Habitation Module",
+    "category": 2,
+    "grid_size": [2.0, 2.0],
+    "build_cost": [
+      {"resource_type": "ConstructionMaterial", "amount": 50.0},
+      {"resource_type": "Minerals",           "amount": 30.0}
+    ],
+    "power_consumption": 2.0,
+    "output_per_tick": [],
+    "tir_requirement": 1,
+    "description": "Worker housing module. +16 unit capacity."
+  },
+  {
+    "name": "DA_Building_WallSegment",
+    "display_name": "Wall Segment",
+    "category": 2,
+    "grid_size": [1.0, 1.0],
+    "build_cost": [
+      {"resource_type": "ConstructionMaterial", "amount": 10.0}
+    ],
+    "power_consumption": 0.0,
+    "output_per_tick": [],
+    "tir_requirement": 1,
+    "description": "Passive defensive wall segment. +5% defense bonus to adjacent buildings."
+  },
+  {
+    "name": "DA_Building_Gate",
+    "display_name": "Gate",
+    "category": 2,
+    "grid_size": [2.0, 1.0],
+    "build_cost": [
+      {"resource_type": "ConstructionMaterial", "amount": 20.0},
+      {"resource_type": "Minerals",           "amount": 10.0}
+    ],
+    "power_consumption": 1.0,
+    "output_per_tick": [],
+    "tir_requirement": 1,
+    "description": "Controlled entry point for wall perimeters. Powered to function."
+  },
+  {
+    "name": "DA_Building_Locker",
+    "display_name": "Locker",
+    "category": 3,
+    "grid_size": [1.0, 1.0],
+    "build_cost": [
+      {"resource_type": "ConstructionMaterial", "amount": 15.0}
+    ],
+    "power_consumption": 0.0,
+    "output_per_tick": [],
+    "tir_requirement": 1,
+    "description": "Basic personal storage locker. +200 storage per resource type."
+  },
+  {
+    "name": "DA_Building_Mine",
+    "display_name": "Mine",
+    "category": 1,
+    "grid_size": [2.0, 2.0],
+    "build_cost": [
+      {"resource_type": "ConstructionMaterial", "amount": 40.0},
+      {"resource_type": "Minerals",           "amount": 30.0}
+    ],
+    "power_consumption": 5.0,
+    "output_per_tick": [{"resource_type": "Minerals", "amount": 8.0}],
+    "tir_requirement": 1,
+    "description": "Extracts minerals from underground deposits. Requires power connection.",
+    "biome_modifiers": [
+      {"biome_type": "Rocky",   "multiplier": 1.25},
+      {"biome_type": "Desert",  "multiplier": 0.75}
+    ]
+  }
+]

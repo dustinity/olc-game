@@ -1,0 +1,48 @@
+[
+  {
+    "name": "BP_BuildingBase",
+    "parent_class": "/Script/OurLastChance.OLCBuildingBase"
+  },
+  {
+    "name": "BP_SolarArray",
+    "parent_class": "/Script/OurLastChance.OLCPowerGenerator",
+    "data_asset": "DA_Building_SolarArray",
+    "mesh_type": "box_cylinder"
+  },
+  {
+    "name": "BP_CampBarracks",
+    "parent_class": "/Script/OurLastChance.OLCInfrastructure",
+    "data_asset": "DA_Building_CampBarracks",
+    "mesh_type": "box"
+  },
+  {
+    "name": "BP_HabitationModule",
+    "parent_class": "/Script/OurLastChance.OLCInfrastructure",
+    "data_asset": "DA_Building_HabitationModule",
+    "mesh_type": "box_large"
+  },
+  {
+    "name": "BP_WallSegment",
+    "parent_class": "/Script/OurLastChance.OLCDefenseStructure",
+    "data_asset": "DA_Building_WallSegment",
+    "mesh_type": "box_flat"
+  },
+  {
+    "name": "BP_Gate",
+    "parent_class": "/Script/OurLastChance.OLCInfrastructure",
+    "data_asset": "DA_Building_Gate",
+    "mesh_type": "box_gate"
+  },
+  {
+    "name": "BP_Locker",
+    "parent_class": "/Script/OurLastChance.OLCBuildingBase",
+    "data_asset": "DA_Building_Locker",
+    "mesh_type": "box_small"
+  },
+  {
+    "name": "BP_Mine",
+    "parent_class": "/Script/OurLastChance.OLCResourceExtractor",
+    "data_asset": "DA_Building_Mine",
+    "mesh_type": "cylinder"
+  }
+]

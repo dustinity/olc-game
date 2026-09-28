@@ -37,7 +37,7 @@ private:
 	FLinearColor GetSmokeColor(int32 SmokeIndex) const;
 	FVector2D GetSmokeOffset(int32 SmokeIndex, float NormalizedTime) const;
 
-	TSharedRef<SWidget> BuildMenuButton(const FText& Label, bool bPrimary, int32 ActionId);
+	TSharedRef<SWidget> BuildMenuButton(const FText& Label, int32 ActionId);
 	TSharedRef<SWidget> BuildSettingsPanel();
 	TSharedRef<SWidget> BuildSettingsRow(const FText& Label, const TSharedRef<SWidget>& Control);
 	TSharedRef<SWidget> BuildSettingOption(TSharedPtr<FString> Option) const;
@@ -65,6 +65,7 @@ private:
 	TUniquePtr<FSlateDynamicImageBrush> BackgroundBrush;
 	TUniquePtr<FSlateDynamicImageBrush> ButtonActiveBrush;
 	TUniquePtr<FSlateDynamicImageBrush> ButtonInactiveBrush;
+	TUniquePtr<FSlateDynamicImageBrush> SettingsPanelBrush;
 	TUniquePtr<FSlateDynamicImageBrush> SmokeBrush;
 	TArray<TSharedPtr<SImage>> SmokeImages;
 	bool bSmokeAssetLoaded = false;

@@ -1,4 +1,5 @@
 #include "OLCPlanetTerrainActor.h"
+#include "OurLastChance.h"
 
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SceneComponent.h"
@@ -13,6 +14,8 @@
 #include "ProceduralMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
 #include "World/OLCPlanetTerrainGenerator.h"
+#include "Engine/World.h"
+#include "VFX/OLCVFXSubsystem.h"
 
 namespace
 {
@@ -182,7 +185,12 @@ void AOLCPlanetTerrainActor::UpdateSurfaceMeshCrossfade(const FLinearColor& Colo
 			const int32 B = A + 1;
 			const int32 C = A + GenerationSettings.MapWidth;
 			const int32 D = C + 1;
-			Triangles.Append({ A, C, B, B, C, D });
+			// Winding must face +Z (up) for the single-sided MAT_TerrainBase to be
+			// visible from the top-down gameplay camera — the previous order
+			// (A,C,B / B,C,D) faced -Z and was back-face culled, leaving the whole
+			// ground invisible while convex prop meshes (which always show some
+			// front face) still rendered.
+			Triangles.Append({ A, B, C, B, D, C });
 		}
 	}
 
@@ -226,6 +234,9 @@ void AOLCPlanetTerrainActor::SetBiome(EOLCBiomeType NewBiome)
 	TargetBiome = NewBiome;
 	bCrossfading = true;
 	CrossfadeProgress = 0.0f;
+
+	// WP-126 step 9: swap the looping biome ambient VFX to match the new biome (append-only).
+	StartBiomeAmbientVFX(NewBiome);
 }
 
 void AOLCPlanetTerrainActor::SetBiomeByIndex(int32 BiomeIndex)
@@ -427,7 +438,12 @@ void AOLCPlanetTerrainActor::RenderSurfaceMesh()
 			const int32 B = A + 1;
 			const int32 C = A + GenerationSettings.MapWidth;
 			const int32 D = C + 1;
-			Triangles.Append({ A, C, B, B, C, D });
+			// Winding must face +Z (up) for the single-sided MAT_TerrainBase to be
+			// visible from the top-down gameplay camera — the previous order
+			// (A,C,B / B,C,D) faced -Z and was back-face culled, leaving the whole
+			// ground invisible while convex prop meshes (which always show some
+			// front face) still rendered.
+			Triangles.Append({ A, B, C, B, D, C });
 		}
 	}
 
@@ -553,24 +569,24 @@ void AOLCPlanetTerrainActor::ApplyAtmosphere(const UOLCPlanetTerrainProfile* Pro
 	}
 
 	// Apply fog settings to world
-	TActorIterator<AExponentialHeightFog> It(GetWorld());
-	if (It)
+	for (TActorIterator<AExponentialHeightFog> It(GetWorld()); It; ++It)
 	{
 		if (UExponentialHeightFogComponent* FogComponent = (*It)->GetComponent())
 		{
 			FogComponent->SetFogDensity(FogDens);
 			FogComponent->SetFogInscatteringColor(FogCol);
 		}
+		break;
 	}
 
 	// Update directional light color if available
-	TActorIterator<ADirectionalLight> DirIt(GetWorld());
-	if (DirIt)
+	for (TActorIterator<ADirectionalLight> It(GetWorld()); It; ++It)
 	{
-		if (UDirectionalLightComponent* LightComponent = Cast<UDirectionalLightComponent>((*DirIt)->GetLightComponent()))
+		if (UDirectionalLightComponent* LightComponent = Cast<UDirectionalLightComponent>((*It)->GetLightComponent()))
 		{
 			LightComponent->SetLightColor(DirLightCol);
 		}
+		break;
 	}
 }
 
@@ -581,17 +597,24 @@ void AOLCPlanetTerrainActor::ConfigureMaterial(UInstancedStaticMeshComponent* Co
 		return;
 	}
 
-	// Create a dynamic instance from the current material (or its parent if it's already an instance)
+	// Create a dynamic instance from the current material (or reuse it if this component
+	// already has one from a prior call — GenerateAndRender runs more than once per actor
+	// lifetime, and MIDs cannot parent other MIDs).
 	UMaterialInterface* SourceMat = Component->GetMaterial(0);
 	if (!SourceMat)
 	{
 		return;
 	}
 
-	UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(SourceMat, this);
+	UMaterialInstanceDynamic* DynamicMaterial = Cast<UMaterialInstanceDynamic>(SourceMat);
+	if (!DynamicMaterial)
+	{
+		DynamicMaterial = UMaterialInstanceDynamic::Create(SourceMat, this);
+		Component->SetMaterial(0, DynamicMaterial);
+	}
+
 	DynamicMaterial->SetVectorParameterValue(PlanetColorParameterName, Color);
 	DynamicMaterial->SetScalarParameterValue(PlanetRoughnessParameterName, Roughness);
-	Component->SetMaterial(0, DynamicMaterial);
 }
 
 FVector AOLCPlanetTerrainActor::TileToWorld(int32 X, int32 Y, float Height01) const
@@ -658,4 +681,37 @@ const UOLCPlanetTerrainProfile* AOLCPlanetTerrainActor::FindActiveProfile() cons
 		}
 	}
 	return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Biome ambient VFX hook (WP-126 step-9; append-only)
+// ---------------------------------------------------------------------------
+void AOLCPlanetTerrainActor::StartBiomeAmbientVFX(EOLCBiomeType NewBiome)
+{
+	// Stop the currently active ambient first — exactly one ambient at a time.
+	if (AActor* Old = BiomeAmbientActor.Get())
+	{
+		Old->Destroy();
+		BiomeAmbientActor = nullptr;
+
+		// Diagnostic: make the stop observable in PIE logs (WP-126 step-9 verification).
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Biome ambient VFX: previous ambient stopped"));
+	}
+
+	UWorld* World = GetWorld();
+	const UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
+	if (!GI)
+	{
+		return;
+	}
+
+	if (UOLCVFXSubsystem* VFX = GI->GetSubsystem<UOLCVFXSubsystem>())
+	{
+		BiomeAmbientActor = VFX->SpawnBiomeAmbient(NewBiome, GetActorLocation());
+
+		// Diagnostic: make the start observable in PIE logs (WP-126 step-9 verification).
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Biome ambient VFX: biome %d ambient %s"),
+			static_cast<int32>(NewBiome),
+			BiomeAmbientActor.IsValid() ? TEXT("started") : TEXT("FAILED to start"));
+	}
 }

@@ -23,7 +23,7 @@ namespace DropshipAssetPath
 	FString RepairIcon(const FString& FileName)
 	{
 		return FPaths::ConvertRelativePathToFull(
-			FPaths::ProjectDir() / TEXT("../../UE5/Assets/UI/Dropship Repair View/Assets") / FileName);
+			FPaths::ProjectDir() / TEXT("../../../Assets/UI/Dropship Repair View/Assets") / FileName);
 	}
 
 	bool AssetExists(const FString& Path) { return FPaths::FileExists(Path); }
@@ -301,6 +301,14 @@ TSharedRef<SWidget> UOLCDropshipRepairWidget::BuildHullSchematic()
 						for (const auto& Cost : Module.RepairCost)
 						{
 							Data->AddResource(Cost.ResourceType, -Cost.CurrentValue);
+						}
+
+						// WP-129 Step 2: route drive-repair initiation through the central
+						// drive-status event so the BeginDriveRepair tutorial hook fires from
+						// this screen too (guarded + edge-triggered inside SetDriveStatus).
+						if (Module.Category == EOLCShipModuleCategory::Drives)
+						{
+							Data->SetDriveStatus(EOLCModuleState::Installed);
 						}
 					}
 				}

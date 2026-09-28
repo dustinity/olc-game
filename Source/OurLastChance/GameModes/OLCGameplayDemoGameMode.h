@@ -20,7 +20,10 @@ protected:
 
 private:
     void SetupRTSCamera(APlayerController* PC);
+    void SetupDemoBuildings();
 
     UPROPERTY()
     TObjectPtr<ACameraActor> RTSCamera;
+
+    FTimerHandle DemoSetupTimer;
 };

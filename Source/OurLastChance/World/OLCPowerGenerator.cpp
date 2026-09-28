@@ -1,4 +1,5 @@
 #include "OLCPowerGenerator.h"
+#include "OurLastChance.h"
 
 #include "Core/OLCUIDataSubsystem.h"
 #include "Kismet/GameplayStatics.h"
@@ -18,13 +19,13 @@ void AOLCPowerGenerator::BeginPlay()
 
 	if (CurrentPowerOutput < 0.0f)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Power generator '%s' producing %.1f power"),
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Power generator '%s' producing %.1f power"),
 			*BuildingData.DisplayName.ToString(), FMath::Abs(CurrentPowerOutput));
 
 	}
 	else
 	{
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Power consumer '%s' using %.1f power"),
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Power consumer '%s' using %.1f power"),
 			*BuildingData.DisplayName.ToString(), CurrentPowerOutput);
 	}
 }
@@ -56,7 +57,7 @@ void AOLCPowerGenerator::Tick(float DeltaTime)
 		}
 	}
 
-	UE_LOG(LogTemp, Verbose, TEXT("[OLC] Generator '%s' produced %.1f energy (biome=%s, multiplier=%.2f)"),
+	UE_LOG(LogOLC, Verbose, TEXT("[OLC] Generator '%s' produced %.1f energy (biome=%s, multiplier=%.2f)"),
 		*BuildingData.DisplayName.ToString(), Output, *UEnum::GetValueAsString(CurrentBiome), Multiplier);
 }
 
@@ -66,7 +67,7 @@ void AOLCPowerGenerator::SetPowered(bool bNewPowered)
 
 	if (CurrentPowerOutput < 0.0f)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Generator '%s' %s power output"),
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Generator '%s' %s power output"),
 			*BuildingData.DisplayName.ToString(),
 			bNewPowered ? TEXT("active") : TEXT("offline"));
 	}

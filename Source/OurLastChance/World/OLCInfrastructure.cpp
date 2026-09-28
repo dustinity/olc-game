@@ -1,4 +1,5 @@
 #include "OLCInfrastructure.h"
+#include "OurLastChance.h"
 
 #include "Core/OLCUIDataSubsystem.h"
 #include "Components/BoxComponent.h"
@@ -22,7 +23,7 @@ void AOLCInfrastructure::BeginPlay()
 		Footprint->SetGenerateOverlapEvents(bBlocksMovement);
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Infrastructure '%s' online: housing=%d, storage+%.0f, blocks=%s"),
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Infrastructure '%s' online: housing=%d, storage+%.0f, blocks=%s"),
 		*BuildingData.DisplayName.ToString(),
 		UnitHousingBonus,
 		StorageCapacityBonus,
@@ -62,7 +63,7 @@ void AOLCInfrastructure::CompleteTraining()
 	const FVector SpawnLocation = GetActorLocation() + FVector(0.0f, 0.0f, 50.0f);
 	const FRotator SpawnRotation = GetActorRotation();
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Infrastructure '%s' finished training unit '%s' at %s"),
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Infrastructure '%s' finished training unit '%s' at %s"),
 		*BuildingData.DisplayName.ToString(),
 		*ActiveTraining->UnitName.ToString(),
 		*SpawnLocation.ToString());
@@ -86,7 +87,7 @@ void AOLCInfrastructure::CompleteTraining()
 			}
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Unit '%s' spawned at %s"),
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Unit '%s' spawned at %s"),
 			*ActiveTraining->UnitName.ToString(), *SpawnLocation.ToString());
 	}
 
@@ -96,14 +97,14 @@ void AOLCInfrastructure::CompleteTraining()
 	if (TrainingQueue.Num() > 0)
 	{
 		ActiveTraining = &TrainingQueue[0];
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Infrastructure '%s' started training next unit: %s"),
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Infrastructure '%s' started training next unit: %s"),
 			*BuildingData.DisplayName.ToString(), *ActiveTraining->UnitName.ToString());
 	}
 	else
 	{
 		ActiveTraining = nullptr;
 		bIsTraining = false;
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Infrastructure '%s' training queue empty — idle"),
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Infrastructure '%s' training queue empty — idle"),
 			*BuildingData.DisplayName.ToString());
 	}
 }
@@ -120,7 +121,7 @@ void AOLCInfrastructure::ToggleGate()
 		Footprint->SetCollisionEnabled(bGateOpen ? ECollisionEnabled::NoCollision : ECollisionEnabled::QueryAndPhysics);
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Gate '%s' %s"),
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Gate '%s' %s"),
 		*BuildingData.DisplayName.ToString(),
 		bGateOpen ? TEXT("OPEN") : TEXT("CLOSED"));
 }
@@ -129,14 +130,35 @@ void AOLCInfrastructure::StartTraining(UOLCUnitData* UnitDataAsset)
 {
 	if (!UnitDataAsset)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] StartTraining called with null UnitDataAsset on '%s'"),
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] StartTraining called with null UnitDataAsset on '%s'"),
 			*BuildingData.DisplayName.ToString());
 		return;
 	}
 
+	FText FailureReason;
+	if (!CanTrainUnit(UnitDataAsset, FailureReason))
+	{
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Cannot train '%s': %s"),
+			*UnitDataAsset->DisplayName.ToString(),
+			*FailureReason.ToString());
+		return;
+	}
+
+	if (UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+	{
+		if (UOLCUIDataSubsystem* Data = GI->GetSubsystem<UOLCUIDataSubsystem>())
+		{
+			if (!Data->ConsumeResourcesForBuild(UnitDataAsset->BuildCost))
+			{
+				UE_LOG(LogOLC, Warning, TEXT("[OLC] Training cancelled; resources changed before deduction"));
+				return;
+			}
+		}
+	}
+
 	FOLCTrainingQueueEntry Entry;
 	Entry.UnitDataAsset = UnitDataAsset;
-	Entry.Duration = UnitDataAsset->TrainingTime;
+	Entry.Duration = UnitDataAsset->ProductionTimeSeconds;
 	Entry.Progress = 0.0f;
 	Entry.UnitName = UnitDataAsset->DisplayName;
 
@@ -149,8 +171,62 @@ void AOLCInfrastructure::StartTraining(UOLCUnitData* UnitDataAsset)
 		bIsTraining = true;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Infrastructure '%s' queued unit '%s' (queue size: %d)"),
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Infrastructure '%s' queued unit '%s' (queue size: %d)"),
 		*BuildingData.DisplayName.ToString(),
 		*Entry.UnitName.ToString(),
 		TrainingQueue.Num());
+}
+
+bool AOLCInfrastructure::CanTrainUnit(UOLCUnitData* UnitDataAsset, FText& OutReason) const
+{
+	if (!UnitDataAsset)
+	{
+		OutReason = FText::FromString(TEXT("No unit selected"));
+		return false;
+	}
+	if (TrainingQueue.Num() >= MaxTrainingQueueSize)
+	{
+		OutReason = FText::FromString(TEXT("Training queue full"));
+		return false;
+	}
+	if (UnitDataAsset->UnitType != EOLCUnitType::Infantry && UnitDataAsset->UnitType != EOLCUnitType::Champion)
+	{
+		OutReason = FText::FromString(TEXT("Barracks can only train infantry/support units"));
+		return false;
+	}
+	if (UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+	{
+		if (UOLCUIDataSubsystem* Data = GI->GetSubsystem<UOLCUIDataSubsystem>())
+		{
+			if (Data->GetColonyTIR() < UnitDataAsset->TIRRequirement)
+			{
+				OutReason = FText::FromString(TEXT("Colony TIR too low"));
+				return false;
+			}
+			if (Data->GetCurrentUnitCount() + TrainingQueue.Num() >= Data->GetMaxUnitCapacity())
+			{
+				OutReason = FText::FromString(TEXT("No Capacity"));
+				return false;
+			}
+			if (!Data->CanAffordBuild(UnitDataAsset->BuildCost))
+			{
+				OutReason = FText::FromString(TEXT("Insufficient resources"));
+				return false;
+			}
+		}
+	}
+	OutReason = FText::GetEmpty();
+	return true;
+}
+
+bool AOLCInfrastructure::HasCapacityForTraining() const
+{
+	if (UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+	{
+		if (UOLCUIDataSubsystem* Data = GI->GetSubsystem<UOLCUIDataSubsystem>())
+		{
+			return Data->GetCurrentUnitCount() + TrainingQueue.Num() < Data->GetMaxUnitCapacity();
+		}
+	}
+	return true;
 }

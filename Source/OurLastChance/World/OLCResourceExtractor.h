@@ -21,6 +21,15 @@ public:
 
         virtual void Tick(float DeltaTime) override;
 
+        UFUNCTION(BlueprintPure, Category = "OLC|Extraction")
+        bool HasConnectedResourceTile() const { return ConnectedResourceTileIndex >= 0; }
+
+        UFUNCTION(BlueprintPure, Category = "OLC|Extraction")
+        float GetExtractionMultiplier() const { return CalculateProductionMultiplier(); }
+
+        UFUNCTION(BlueprintPure, Category = "OLC|Extraction")
+        EOLCResourceType GetExtractedResourceType() const { return ExtractedResourceType; }
+
 protected:
         virtual void BeginPlay() override;
 
@@ -48,13 +57,6 @@ protected:
         UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|Extraction", meta = (AllowPrivateAccess = "true"))
         float ScavengingMultiplier = 0.25f;
 
-        /** Default production interval in seconds. */
-        UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|Production", meta = (AllowPrivateAccess = "true"))
-        float ProductionInterval = 60.0f;
-
-        /** Accumulated delta time toward next production tick. */
-        float ProductionAccumulator = 0.0f;
-
         // -----------------------------------------------------------------------
         // Resource tile reference
         // -----------------------------------------------------------------------
@@ -66,6 +68,9 @@ protected:
         /** Multiplier applied to production based on richness and biome. */
         UPROPERTY()
         float ProductionMultiplier = 1.0f;
+
+        UPROPERTY()
+        EOLCResourceType ExtractedResourceType = EOLCResourceType::Minerals;
 
         // -----------------------------------------------------------------------
         // Visual marker for resource tile

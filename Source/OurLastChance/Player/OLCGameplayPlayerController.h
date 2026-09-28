@@ -9,6 +9,7 @@ class AOLCUnitBase;
 class AOLCPlanetTerrainActor;
 class UUserWidget;
 class UOLCUIDataSubsystem;
+class UOLCKeymapWidget;
 
 /**
  * Gameplay player controller for RTS controls plus UI overlays.
@@ -21,6 +22,9 @@ class OURLASTCHANCE_API AOLCGameplayPlayerController : public APlayerController
 
 public:
 	AOLCGameplayPlayerController();
+
+	/** WP-107 Step 5: Pan camera to minimap click location. */
+	void OnMinimapClick(FVector2D MinimapCoord);
 
 protected:
 	virtual void BeginPlay() override;
@@ -39,8 +43,8 @@ protected:
 	/** WP-107 Step 5: Toggle main HUD overlay (F1 key). */
 	void OnToggleMainHUD();
 
-	/** WP-107 Step 5: Pan camera to minimap click location. */
-	void OnMinimapClick(FVector2D MinimapCoord);
+	/** Toggle the player-facing keymap overlay (H key). */
+	void OnToggleKeymap();
 
 	/** Left-click: raycast to select a unit. */
 	UFUNCTION()
@@ -81,6 +85,9 @@ private:
 	/** WP-107 Step 5: Reference to the main HUD widget for minimap click handling. */
 	UPROPERTY()
 	TObjectPtr<UUserWidget> MainHUDWidget;
+
+	UPROPERTY()
+	TObjectPtr<UOLCKeymapWidget> KeymapWidget;
 
 	/** Currently selected unit (set by left-click raycast). */
 	UPROPERTY()

@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Core/OLCResourceTypes.h"
+#include "Core/OLCTutorialTypes.h"
 #include "Core/OLCWidgetBase.h"
 #include "OLCHUDWidgets.generated.h"
 
@@ -29,6 +30,8 @@ public:
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
+	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 
 private:
 	TSharedRef<SWidget> BuildResourceStrip();
@@ -47,6 +50,29 @@ private:
 	/** WP-107 Step 7: Queue a toast notification from gameplay events. */
 	UFUNCTION(BlueprintCallable, Category = "OLC|HUD")
 	void QueueToastNotification(const FText& InTitle, const FText& InMessage, EOLCColorRole InColor = EOLCColorRole::Default);
+
+	// -----------------------------------------------------------------------
+	// WP-129 Step 4: contextual tutorial hint
+	// -----------------------------------------------------------------------
+
+	/** Top-center contextual hint bound to the tutorial subsystem's active objective. */
+	TSharedRef<SWidget> BuildTutorialHint();
+
+	/** UOLCTutorialSubsystem::OnTutorialAdvanced handler — refreshes the hint text/visibility. */
+	UFUNCTION()
+	void HandleTutorialAdvanced(EOLCTutorialObjective NewActiveObjective);
+
+	/** Re-applies the current hint text and collapses the container once the tutorial ends. */
+	void RefreshTutorialHint();
+
+	/** Short instruction string for the active objective; empty once complete/skipped. */
+	FText GetTutorialHintText() const;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UOLCToastStackWidget> ToastStackWidget;
+
+	TSharedPtr<class STextBlock> TutorialHintTextBlock;
+	TSharedPtr<SWidget> TutorialHintContainer;
 };
 
 // ===================================================================

@@ -1,4 +1,5 @@
 #include "OLCResourceExtractor.h"
+#include "OurLastChance.h"
 
 #include "Core/OLCUIDataSubsystem.h"
 #include "Kismet/GameplayStatics.h"
@@ -6,6 +7,7 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
 #include "World/OLCPlanetTerrainActor.h"
 
 AOLCResourceExtractor::AOLCResourceExtractor()
@@ -16,6 +18,14 @@ AOLCResourceExtractor::AOLCResourceExtractor()
         ResourceMarkerComponent = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("ResourceMarker"));
         ResourceMarkerComponent->SetupAttachment(RootComponent);
         ResourceMarkerComponent->SetVisibility(true);
+        ResourceMarkerComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        ResourceMarkerComponent->NumCustomDataFloats = 3;
+
+        static ConstructorHelpers::FObjectFinder<UStaticMesh> MarkerMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+        if (MarkerMesh.Succeeded())
+        {
+                ResourceMarkerComponent->SetStaticMesh(MarkerMesh.Object);
+        }
 }
 
 void AOLCResourceExtractor::BeginPlay()
@@ -34,7 +44,7 @@ void AOLCResourceExtractor::BeginPlay()
         // Start production timer if building has output defined
         if (BuildingData.OutputPerTick.Num() > 0 && IsPowered())
         {
-                UE_LOG(LogTemp, Log, TEXT("[OLC] Resource extractor '%s' started production (biome=%s, multiplier=%.2f)"),
+                UE_LOG(LogOLC, Log, TEXT("[OLC] Resource extractor '%s' started production (biome=%s, multiplier=%.2f)"),
                         *BuildingData.DisplayName.ToString(), *UEnum::GetValueAsString(CurrentBiome), ProductionMultiplier);
         }
 }
@@ -48,43 +58,8 @@ void AOLCResourceExtractor::Tick(float DeltaTime)
         // Update marker pulse animation
         UpdateMarkerPulse(DeltaTime);
 
-        // Accumulate time and produce when interval reached
-        ProductionAccumulator += DeltaTime;
-
-        if (ProductionAccumulator >= ProductionInterval)
-        {
-                ProductionAccumulator = 0.0f;
-
-                // Calculate production amount with richness scaling
-                float Multiplier = CalculateProductionMultiplier();
-
-                // Add each output resource to the subsystem counters via AddResource()
-                if (UGameInstance* GI = GetWorld()->GetGameInstance())
-                {
-                        if (UOLCUIDataSubsystem* Data = GI->GetSubsystem<UOLCUIDataSubsystem>())
-                        {
-                                for (const auto& Output : BuildingData.OutputPerTick)
-                                {
-                                        float BaseAmount = Output.Delta > 0 ? Output.Delta : Output.CurrentValue;
-                                        float ScaledAmount = BaseAmount * Multiplier;
-
-                                        // Apply biome modifiers from building data
-                                        float BiomeMod = BuildingData.GetBiomeMultiplier(CurrentBiome);
-                                        ScaledAmount *= BiomeMod;
-
-                                        Data->AddResource(Output.ResourceType, ScaledAmount);
-
-                                        UE_LOG(LogTemp, Verbose, TEXT("[OLC] Extractor '%s' produced %.1f %s (base=%.1f, richness=%.2f, biome=%.2f)"),
-                                                *BuildingData.DisplayName.ToString(),
-                                                ScaledAmount,
-                                                *UEnum::GetValueAsString(Output.ResourceType),
-                                                BaseAmount,
-                                                ProductionMultiplier,
-                                                BiomeMod);
-                                }
-                        }
-                }
-        }
+        // Resource production is owned by UOLCUIDataSubsystem's global tick.
+        // Keeping it in one place avoids double-crediting extractor output.
 }
 
 void AOLCResourceExtractor::FindNearestResourceTile()
@@ -98,7 +73,7 @@ void AOLCResourceExtractor::FindNearestResourceTile()
         AActor* TerrainActor = UGameplayStatics::GetActorOfClass(GetWorld(), AOLCPlanetTerrainActor::StaticClass());
         if (!TerrainActor)
         {
-                UE_LOG(LogTemp, Warning, TEXT("[OLC] Resource extractor: no terrain actor found"));
+                UE_LOG(LogOLC, Warning, TEXT("[OLC] Resource extractor: no terrain actor found"));
                 return;
         }
 
@@ -138,15 +113,16 @@ void AOLCResourceExtractor::FindNearestResourceTile()
         {
                 ConnectedResourceTileIndex = NearestIndex;
                 ProductionMultiplier = FMath::Clamp(Tiles[NearestIndex].ResourceRichness, 0.35f, 1.0f);
+                ExtractedResourceType = Tiles[NearestIndex].ResourceType;
 
-                UE_LOG(LogTemp, Log, TEXT("[OLC] Resource extractor '%s' connected to resource tile at index %d (richness=%.2f, multiplier=%.2f)"),
+                UE_LOG(LogOLC, Log, TEXT("[OLC] Resource extractor '%s' connected to resource tile at index %d (richness=%.2f, multiplier=%.2f)"),
                         *BuildingData.DisplayName.ToString(), NearestIndex, Tiles[NearestIndex].ResourceRichness, ProductionMultiplier);
         }
         else
         {
                 // No resource tile found — use scavenging mode
                 ProductionMultiplier = ScavengingMultiplier;
-                UE_LOG(LogTemp, Warning, TEXT("[OLC] Resource extractor '%s' no resource tile found within %f tiles — using scavenging mode (multiplier=%.2f)"),
+                UE_LOG(LogOLC, Warning, TEXT("[OLC] Resource extractor '%s' no resource tile found within %f tiles — using scavenging mode (multiplier=%.2f)"),
                         *BuildingData.DisplayName.ToString(), ResourceSearchRadius, ScavengingMultiplier);
         }
 }
@@ -182,8 +158,16 @@ void AOLCResourceExtractor::SpawnResourceMarker()
         // Get resource tile location
         FVector TileLocation = Terrain->GetTileWorldPosition(Tiles[ConnectedResourceTileIndex].Coord);
 
-        // Set marker component location to resource tile
-        ResourceMarkerComponent->SetWorldLocation(TileLocation);
+        ResourceMarkerComponent->ClearInstances();
+        const FVector LocalLocation = ResourceMarkerComponent->GetComponentTransform().InverseTransformPosition(TileLocation + FVector(0.0f, 0.0f, 35.0f));
+        const int32 MarkerIndex = ResourceMarkerComponent->AddInstance(FTransform(FRotator::ZeroRotator, LocalLocation, FVector(0.22f)));
+
+        const FLinearColor MarkerColor = ExtractedResourceType == EOLCResourceType::Fuel
+                ? FLinearColor(1.0f, 0.3f, 0.02f)
+                : FLinearColor(0.0f, 0.9f, 1.0f);
+        ResourceMarkerComponent->SetCustomDataValue(MarkerIndex, 0, MarkerColor.R, false);
+        ResourceMarkerComponent->SetCustomDataValue(MarkerIndex, 1, MarkerColor.G, false);
+        ResourceMarkerComponent->SetCustomDataValue(MarkerIndex, 2, MarkerColor.B, true);
 
         // Create material instance dynamic for pulse animation
         if (ResourceMarkerComponent->GetMaterial(0))
@@ -192,7 +176,7 @@ void AOLCResourceExtractor::SpawnResourceMarker()
                 ResourceMarkerComponent->SetMaterial(0, MarkerMaterialInstance);
         }
 
-        UE_LOG(LogTemp, Log, TEXT("[OLC] Resource marker spawned at tile %d (%s)"),
+        UE_LOG(LogOLC, Log, TEXT("[OLC] Resource marker spawned at tile %d (%s)"),
                 ConnectedResourceTileIndex, *UEnum::GetValueAsString(Tiles[ConnectedResourceTileIndex].ResourceType));
 }
 

@@ -122,8 +122,8 @@ BUILDINGS = [
             ("ConstructionMaterial", 40.0),
             ("Minerals", 30.0),
         ],
-        "power_consumption": -5.0,
-        "output_per_tick": [],
+        "power_consumption": 5.0,
+        "output_per_tick": [("Minerals", 8.0)],
         "tir_requirement": 1,
         "description": (
             "Extracts minerals from underground deposits. "

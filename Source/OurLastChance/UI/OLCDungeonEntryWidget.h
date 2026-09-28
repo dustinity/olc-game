@@ -11,7 +11,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDungeonDeploy, const UOLCDungeonD
 
 /**
  * S07 Dungeon Entry screen — zone list with difficulty badges, reward preview, Deploy button.
- * Displays sample dungeons from Briefing dungeon types catalog.
+ * Displays seven procedural dungeon archetypes with seeded, fully-reachable layouts.
  */
 UCLASS()
 class OURLASTCHANCE_API UOLCDungeonEntryWidget : public UUserWidget
@@ -42,8 +42,20 @@ private:
 	/** Build the reward preview panel (right side). */
 	TSharedRef<SWidget> BuildRewardPreview();
 
-	/** Initialize sample dungeons from Briefing data. */
+	/** Initialize seven procedural dungeon archetypes from WP-130 DataAssets. */
 	void InitializeDungeons();
+
+	/** Display rarity tier badge color and tooltip for an archetype. */
+	FLinearColor GetRarityColor(EOLCDungeonRarityTier Tier);
+
+	/** Display rarity tier display name for an archetype. */
+	FText GetRarityDisplayName(EOLCDungeonRarityTier Tier);
+
+	/** Display boss phase indicator text for an archetype. */
+	FText GetPhaseIndicator(const UOLCDungeonData* Dungeon);
+
+	/** Display layout seed text for an archetype. */
+	FText GetLayoutSeedText(int32 Seed);
 
 	TArray<TObjectPtr<UOLCDungeonData>> SampleDungeons;
 	int32 SelectedIndex = -1;

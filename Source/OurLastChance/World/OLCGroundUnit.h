@@ -21,10 +21,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "OLC|Ground")
 	void MoveTo(const FVector& TargetLocation);
 
+	UFUNCTION(BlueprintPure, Category = "OLC|Ground")
+	bool IsMoving() const { return CurrentPath.Num() > 0; }
+
 protected:
+	virtual void Tick(float DeltaTime) override;
 	virtual void BeginPlay() override;
 
-private:
+protected:
 	/** Current movement speed from UnitData. */
 	float CurrentSpeed = 200.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "OLC|Ground")
+	TArray<FVector> CurrentPath;
+
+	int32 PathIndex = 0;
 };

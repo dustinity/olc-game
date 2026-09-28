@@ -1,5 +1,12 @@
 #include "OLCUIDataSubsystem.h"
+#include "OurLastChance.h"
+#include "World/OLCResourceExtractor.h"
+#include "Core/OLCResearchSubsystem.h"
+#include "Core/OLCTutorialSubsystem.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Logging/LogMacros.h"
+
+// WP-129 Step 2: manual-mining, solar-placement and drive-repair tutorial hooks live in this file.
 
 #define LOCTEXT_NAMESPACE "OLCUIDataSubsystem"
 
@@ -7,15 +14,16 @@ void UOLCUIDataSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] UI Data Subsystem initializing with fake data..."));
+	UE_LOG(LogOLC, Log, TEXT("[OLC] UI Data Subsystem initializing with fake data..."));
 
 	PopulateFakeResources();
 	PopulateFakeMissionObjectives();
 	PopulateFakeBuildCards();
 	PopulateFakeMinimapMarkers();
 	PopulateShipModules();
+	StartProductionTick();
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Fake data populated."));
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Fake data populated."));
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +112,30 @@ void UOLCUIDataSubsystem::PopulateFakeBuildCards()
 	ConstructionCategories.Add(EOLCConstructionCategory::Special);
 
 	BuildCards.Reset();
+
+	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+	FARFilter BuildingFilter;
+	BuildingFilter.ClassPaths.Add(UOLCBuildingData::StaticClass()->GetClassPathName());
+	BuildingFilter.PackagePaths.Add(TEXT("/Game/OurLastChance/Data/Buildings"));
+	BuildingFilter.bRecursivePaths = true;
+	TArray<FAssetData> BuildingAssets;
+	AssetRegistryModule.Get().GetAssets(BuildingFilter, BuildingAssets);
+	BuildingAssets.Sort([](const FAssetData& A, const FAssetData& B) { return A.AssetName.LexicalLess(B.AssetName); });
+	for (const FAssetData& Asset : BuildingAssets)
+	{
+		if (UOLCBuildingData* Data = Cast<UOLCBuildingData>(Asset.GetAsset()))
+		{
+			FOLCBuildCardViewData& Card = BuildCards.Add_GetRef(FOLCBuildCardViewData());
+			Card.BuildingName = Data->DisplayName; Card.Category = Data->Category; Card.TIRRequirement = Data->TIRRequirement;
+			Card.GridSize = Data->GridSize; Card.BuildCost = Data->BuildCost; Card.PowerConsumption = Data->PowerConsumption;
+			Card.Description = Data->Description; Card.ExpectedOutputPerTick = Data->OutputPerTick; Card.SourceData = Data; Card.bAvailable = true;
+		}
+	}
+	if (!BuildCards.IsEmpty())
+	{
+		UE_LOG(LogOLC, Display, TEXT("[OLC] Loaded %d build cards from DataAssets"), BuildCards.Num());
+		return;
+	}
 
 	// --- Power ---
 	{
@@ -575,6 +607,8 @@ void UOLCUIDataSubsystem::PopulateFakeBuildCards()
 		card.Description = LOCTEXT("BeaconDesc", "Broadcasts distress signal for rescue or trade.");
 		card.bAvailable = true;
 	}
+
+	RefreshBuildCardAvailability();
 }
 
 TArray<FOLCBuildCardViewData> UOLCUIDataSubsystem::GetBuildCardsForCategory(EOLCConstructionCategory InCategory) const
@@ -677,12 +711,50 @@ void UOLCUIDataSubsystem::AddResource(EOLCResourceType ResourceType, float Amoun
 	{
 		if (Res.ResourceType == ResourceType)
 		{
-			Res.Value += Amount;
-			// Clamp to capacity.
-			if (Res.Value > Res.Capacity)
-				Res.Value = Res.Capacity;
+			const float MaxCapacity = GetMaxCapacity(ResourceType);
+			const float RequestedValue = Res.Value + Amount;
+			if (RequestedValue > MaxCapacity)
+			{
+				UE_LOG(LogOLC, Warning, TEXT("[OLC] Resource %d full; %.1f production discarded"), static_cast<int32>(ResourceType), RequestedValue - MaxCapacity);
+			}
+			Res.Value = FMath::Clamp(RequestedValue, 0.0f, MaxCapacity);
 			break;
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Manual mining collection path (WP-129 Step 2)
+// ---------------------------------------------------------------------------
+void UOLCUIDataSubsystem::AddResourceFromManualMining(EOLCResourceType ResourceType, float Amount)
+{
+	AddResource(ResourceType, Amount);
+
+	if (ResourceType != EOLCResourceType::ConstructionMaterial)
+	{
+		return;
+	}
+
+	UOLCTutorialSubsystem* Tutorial = GetGameInstance() ? GetGameInstance()->GetSubsystem<UOLCTutorialSubsystem>() : nullptr;
+	if (!Tutorial || Tutorial->IsObjectiveComplete(EOLCTutorialObjective::CollectMaterials))
+	{
+		return; // Guard: completes at most once.
+	}
+
+	float TotalCM = 0.0f;
+	for (const FOLCResourceCounterViewData& Res : ResourceCounters)
+	{
+		if (Res.ResourceType == EOLCResourceType::ConstructionMaterial)
+		{
+			TotalCM = Res.Value;
+			break;
+		}
+	}
+
+	if (TotalCM >= 50.0f)
+	{
+		Tutorial->CompleteObjective(EOLCTutorialObjective::CollectMaterials);
+		UE_LOG(LogOLC, Display, TEXT("[OLC] Tutorial: construction material threshold reached (%.1f CM)"), TotalCM);
 	}
 }
 
@@ -716,7 +788,7 @@ bool UOLCUIDataSubsystem::ConsumeResourcesForBuild(const TArray<FOLCResourceAmou
 {
 	if (!CanAffordBuild(BuildCost))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Cannot afford build — insufficient resources"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Cannot afford build — insufficient resources"));
 		return false;
 	}
 
@@ -733,7 +805,7 @@ bool UOLCUIDataSubsystem::ConsumeResourcesForBuild(const TArray<FOLCResourceAmou
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Resources consumed for build: %d resource types"), BuildCost.Num());
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Resources consumed for build: %d resource types"), BuildCost.Num());
 	return true;
 }
 
@@ -743,41 +815,41 @@ bool UOLCUIDataSubsystem::ConsumeResourcesForBuild(const TArray<FOLCResourceAmou
 void UOLCUIDataSubsystem::SetMissionObjectives(const TArray<FOLCMissionObjectiveViewData>& InObjectives)
 {
 	MissionObjectives = InObjectives;
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Mission objectives set: %d items"), MissionObjectives.Num());
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Mission objectives set: %d items"), MissionObjectives.Num());
 }
 
 void UOLCUIDataSubsystem::CompleteObjective(int32 Index)
 {
 	if (Index < 0 || Index >= MissionObjectives.Num())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] CompleteObjective: invalid index %d (count=%d)"), Index, MissionObjectives.Num());
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] CompleteObjective: invalid index %d (count=%d)"), Index, MissionObjectives.Num());
 		return;
 	}
 
 	MissionObjectives[Index].State = EOLCProgressState::Complete;
 	MissionObjectives[Index].Progress = MissionObjectives[Index].TargetProgress;
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Objective completed: %s"), *MissionObjectives[Index].ObjectiveName.ToString());
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Objective completed: %s"), *MissionObjectives[Index].ObjectiveName.ToString());
 }
 
 void UOLCUIDataSubsystem::ActivateObjective(int32 Index)
 {
 	if (Index < 0 || Index >= MissionObjectives.Num())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] ActivateObjective: invalid index %d (count=%d)"), Index, MissionObjectives.Num());
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] ActivateObjective: invalid index %d (count=%d)"), Index, MissionObjectives.Num());
 		return;
 	}
 
 	MissionObjectives[Index].State = EOLCProgressState::Active;
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Objective activated: %s"), *MissionObjectives[Index].ObjectiveName.ToString());
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Objective activated: %s"), *MissionObjectives[Index].ObjectiveName.ToString());
 }
 
 void UOLCUIDataSubsystem::AdvanceObjectiveProgress(int32 Index, float Delta)
 {
 	if (Index < 0 || Index >= MissionObjectives.Num())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] AdvanceObjectiveProgress: invalid index %d (count=%d)"), Index, MissionObjectives.Num());
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] AdvanceObjectiveProgress: invalid index %d (count=%d)"), Index, MissionObjectives.Num());
 		return;
 	}
 
@@ -786,7 +858,7 @@ void UOLCUIDataSubsystem::AdvanceObjectiveProgress(int32 Index, float Delta)
 	{
 		MissionObjectives[Index].Progress = MissionObjectives[Index].TargetProgress;
 		MissionObjectives[Index].State = EOLCProgressState::Complete;
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Objective completed by progress: %s"), *MissionObjectives[Index].ObjectiveName.ToString());
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Objective completed by progress: %s"), *MissionObjectives[Index].ObjectiveName.ToString());
 	}
 	else
 	{
@@ -803,14 +875,28 @@ void UOLCUIDataSubsystem::AdvanceObjectiveProgress(int32 Index, float Delta)
 
 void UOLCUIDataSubsystem::SetDriveStatus(EOLCModuleState InStatus)
 {
+	const EOLCModuleState PreviousStatus = DriveStatus;
 	DriveStatus = InStatus;
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Drive status set to: %d"), (int32)InStatus);
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Drive status set to: %d"), (int32)InStatus);
+
+	// WP-129 Step 2 — drive repair hook: the dropship drive becoming functional
+	// (installed) is the real "begin drive repair" completion event. Guarded so
+	// repeated status writes re-fire nothing.
+	if (InStatus == EOLCModuleState::Installed && PreviousStatus != EOLCModuleState::Installed)
+	{
+		UOLCTutorialSubsystem* Tutorial = GetGameInstance() ? GetGameInstance()->GetSubsystem<UOLCTutorialSubsystem>() : nullptr;
+		if (Tutorial && !Tutorial->IsObjectiveComplete(EOLCTutorialObjective::BeginDriveRepair))
+		{
+			Tutorial->CompleteObjective(EOLCTutorialObjective::BeginDriveRepair);
+			UE_LOG(LogOLC, Display, TEXT("[OLC] Tutorial: drive repair completed — BeginDriveRepair objective done"));
+		}
+	}
 }
 
 void UOLCUIDataSubsystem::SetDriveTier(int32 InTier)
 {
 	DriveTier = FMath::Clamp(InTier, 1, 5);
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Drive tier set to: %d"), DriveTier);
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Drive tier set to: %d"), DriveTier);
 }
 
 void UOLCUIDataSubsystem::SetShieldStatus(EOLCModuleState InStatus)
@@ -822,13 +908,13 @@ void UOLCUIDataSubsystem::SetShieldStatus(EOLCModuleState InStatus)
 		case EOLCModuleState::Damaged:  ShieldIntegrityPercent = 0.5f; break;
 		case EOLCModuleState::Offline:  ShieldIntegrityPercent = 0.0f; break;
 	}
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Shield status set to: %d (integrity: %.0f%%)"), (int32)InStatus, ShieldIntegrityPercent * 100.0f);
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Shield status set to: %d (integrity: %.0f%%)"), (int32)InStatus, ShieldIntegrityPercent * 100.0f);
 }
 
 void UOLCUIDataSubsystem::AddStorageBonus(int32 Amount)
 {
 	StorageBonusPerResourceType += FMath::Max(Amount, 0);
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Storage bonus added: +%d per resource (total: %d)"), Amount, StorageBonusPerResourceType);
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Storage bonus added: +%d per resource (total: %d)"), Amount, StorageBonusPerResourceType);
 
 	// Apply the bonus to existing resource counters immediately.
 	for (auto& Res : ResourceCounters)
@@ -878,7 +964,7 @@ void UOLCUIDataSubsystem::StartProductionTick()
 {
 	if (ProductionTickTimer.IsValid())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Production tick already running"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Production tick already running"));
 		return;
 	}
 
@@ -890,19 +976,19 @@ void UOLCUIDataSubsystem::StartProductionTick()
 		true // bLoop = true
 	);
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Production tick started (interval: %.1fs)"), ProductionTickInterval);
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Production tick started (interval: %.1fs)"), ProductionTickInterval);
 }
 
 void UOLCUIDataSubsystem::StopProductionTick()
 {
 	if (!ProductionTickTimer.IsValid())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Production tick not running"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Production tick not running"));
 		return;
 	}
 
 	GetWorld()->GetTimerManager().ClearTimer(ProductionTickTimer);
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Production tick stopped"));
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Production tick stopped"));
 }
 
 void UOLCUIDataSubsystem::SetProductionTickInterval(float Interval)
@@ -920,7 +1006,7 @@ void UOLCUIDataSubsystem::SetProductionTickInterval(float Interval)
 			ProductionTickInterval,
 			true
 		);
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Production tick interval updated to %.1fs"), ProductionTickInterval);
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Production tick interval updated to %.1fs"), ProductionTickInterval);
 	}
 }
 
@@ -928,7 +1014,7 @@ void UOLCUIDataSubsystem::RegisterBuilding(AActor* BuildingActor, UOLCBuildingDa
 {
 	if (!BuildingActor || !BuildingData)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] RegisterBuilding: null actor or building data"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] RegisterBuilding: null actor or building data"));
 		return;
 	}
 
@@ -937,20 +1023,20 @@ void UOLCUIDataSubsystem::RegisterBuilding(AActor* BuildingActor, UOLCBuildingDa
 	{
 		if (Entry.Actor.Get() == BuildingActor)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[OLC] RegisterBuilding: building already registered"));
+			UE_LOG(LogOLC, Warning, TEXT("[OLC] RegisterBuilding: building already registered"));
 			return;
 		}
 	}
 
 	RegisteredBuildings.Add(FRegisteredBuildingEntry(BuildingActor, BuildingData));
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Registered building: %s (%d outputs)"), *BuildingData->DisplayName.ToString(), BuildingData->OutputPerTick.Num());
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Registered building: %s (%d outputs)"), *BuildingData->DisplayName.ToString(), BuildingData->OutputPerTick.Num());
 }
 
 void UOLCUIDataSubsystem::UnregisterBuilding(AActor* BuildingActor)
 {
 	if (!BuildingActor)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] UnregisterBuilding: null actor"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] UnregisterBuilding: null actor"));
 		return;
 	}
 
@@ -958,13 +1044,48 @@ void UOLCUIDataSubsystem::UnregisterBuilding(AActor* BuildingActor)
 	{
 		if (RegisteredBuildings[i].Actor.Get() == BuildingActor)
 		{
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Unregistered building"));
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Unregistered building"));
 			RegisteredBuildings.RemoveAt(i);
 			return;
 		}
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("[OLC] UnregisterBuilding: building not found"));
+	UE_LOG(LogOLC, Warning, TEXT("[OLC] UnregisterBuilding: building not found"));
+}
+
+bool UOLCUIDataSubsystem::HasBuildingNamed(const FString& NameSubstring) const
+{
+	for (const FRegisteredBuildingEntry& Entry : RegisteredBuildings)
+	{
+		if (!Entry.Actor.IsValid() || !Entry.BuildingData) continue;
+		if (Entry.BuildingData->DisplayName.ToString().Contains(NameSubstring)) return true;
+	}
+	return false;
+}
+
+void UOLCUIDataSubsystem::RefreshBuildCardAvailability()
+{
+	const UGameInstance* GI = GetGameInstance();
+	const UOLCResearchSubsystem* Research = GI ? GI->GetSubsystem<UOLCResearchSubsystem>() : nullptr;
+	if (!Research) return; // Research subsystem not up yet (e.g. very first Initialize() ordering) — leave defaults as populated.
+
+	for (FOLCBuildCardViewData& Card : BuildCards)
+	{
+		// Ring-tier gate — same TIRRequirement convention used by UOLCTechData
+		// and UOLCBuildingData (see Data/Tech/UOLCTechData.h). TIRRequirement
+		// is 1-based; Core auto-completes at game start, so HighestCompletedRing
+		// starts at 0 and TIR1 cards are available immediately.
+		const bool bRingUnlocked = Card.TIRRequirement <= Research->GetHighestCompletedRing() + 1;
+
+		// Research-unlock gate — a card is only unlock-gated if some tech
+		// actually names it via RegisterBuildCardUnlock()/UnlocksBuildCardName;
+		// cards nobody references stay available by default.
+		const FString CardName = Card.BuildingName.ToString();
+		const bool bResearchGated = Research->IsBuildCardNameReferenced(CardName);
+		const bool bResearchUnlocked = !bResearchGated || Research->IsBuildCardUnlocked(CardName);
+
+		Card.bAvailable = bRingUnlocked && bResearchUnlocked;
+	}
 }
 
 float UOLCUIDataSubsystem::CalculateGridBalance() const
@@ -987,27 +1108,26 @@ void UOLCUIDataSubsystem::SetActiveBiome(EOLCBiomeType Biome)
 {
 	if (ActiveBiome != Biome)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Active biome changed to: %d"), (int32)Biome);
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Active biome changed to: %d"), (int32)Biome);
 	}
 	ActiveBiome = Biome;
 }
 
 float UOLCUIDataSubsystem::GetMaxCapacity(EOLCResourceType ResourceType) const
 {
-	float BaseCapacity = 1000.0f; // Default base capacity
-
-	// Find current resource counter to get its base capacity
-	for (const auto& Res : ResourceCounters)
+	float BaseCapacity = 1000.0f;
+	switch (ResourceType)
 	{
-		if (Res.ResourceType == ResourceType)
-		{
-			BaseCapacity = Res.Capacity;
-			break;
-		}
+		case EOLCResourceType::Fuel: BaseCapacity = 500.0f; break;
+		case EOLCResourceType::ConstructionMaterial: BaseCapacity = 800.0f; break;
+		case EOLCResourceType::Minerals: BaseCapacity = 600.0f; break;
+		case EOLCResourceType::HullParts: BaseCapacity = 300.0f; break;
+		case EOLCResourceType::Survival: BaseCapacity = 100.0f; break;
+		case EOLCResourceType::DarkMatterCrystals: BaseCapacity = 50.0f; break;
+		default: break;
 	}
 
-	// Add locker/storage bonuses
-	float MaxCap = BaseCapacity + StorageBonusPerResourceType * RegisteredBuildings.Num();
+	float MaxCap = BaseCapacity + StorageBonusPerResourceType;
 
 	// Count locker buildings specifically (simplified: all buildings add bonus)
 	for (const auto& Entry : RegisteredBuildings)
@@ -1027,9 +1147,12 @@ EOLCStoragePressure UOLCUIDataSubsystem::GetStoragePressure(EOLCResourceType Res
 	{
 		if (Res.ResourceType == ResourceType)
 		{
-			float Ratio = Res.Value / Res.Capacity;
-			if (Ratio >= 1.0f)
+			const float Capacity = GetMaxCapacity(ResourceType);
+			const float Ratio = Capacity > 0.0f ? Res.Value / Capacity : 0.0f;
+			if (Ratio > 1.0f)
 				return EOLCStoragePressure::Overflow;
+			else if (Ratio >= 1.0f)
+				return EOLCStoragePressure::Full;
 			else if (Ratio >= 0.85f)
 				return EOLCStoragePressure::Approaching;
 			else if (Ratio >= 0.30f)
@@ -1048,7 +1171,7 @@ void UOLCUIDataSubsystem::PerformProductionTick()
 		return; // No buildings to produce
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Performing production tick..."));
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Performing production tick..."));
 
 	CumulativeEnergyProduced = 0.0f;
 
@@ -1057,7 +1180,7 @@ void UOLCUIDataSubsystem::PerformProductionTick()
 
 	// Initialize production rates
 	ProductionRates.Reset();
-	for (int32 i = 0; i < static_cast<int32>(EOLCResourceType::DarkMatterCrystals); ++i)
+	for (int32 i = 0; i <= static_cast<int32>(EOLCResourceType::DarkMatterCrystals); ++i)
 	{
 		EOLCResourceType ResourceType = static_cast<EOLCResourceType>(i);
 		ProductionRates.Emplace(ResourceType, 0.0f, 1000.0f, 0.0f);
@@ -1071,8 +1194,22 @@ void UOLCUIDataSubsystem::PerformProductionTick()
 
 		TArray<FOLCResourceAmount> Outputs = Entry.BuildingData->OutputPerTick;
 
+		if (AOLCResourceExtractor* Extractor = Cast<AOLCResourceExtractor>(Entry.Actor.Get()))
+		{
+			if (!Extractor->IsPowered())
+			{
+				Extractor->ShowProduction(LOCTEXT("ExtractorPowerOff", "POWER OFF"), true);
+				continue;
+			}
+			const float ExtractionMultiplier = Extractor->GetExtractionMultiplier();
+			for (FOLCResourceAmount& Output : Outputs)
+			{
+				Output.CurrentValue *= ExtractionMultiplier;
+			}
+		}
+
 		// Apply biome modifiers
-		ApplyBiomeModifiers(Outputs, ActiveBiome);
+		ApplyBiomeModifiers(Outputs, ActiveBiome, Entry.BuildingData);
 
 		// If power deficit, halve all outputs
 		if (bPowerDeficit)
@@ -1081,7 +1218,23 @@ void UOLCUIDataSubsystem::PerformProductionTick()
 			{
 				Output.CurrentValue *= 0.5f;
 			}
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Power deficit active — output halved for building"));
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Power deficit active — output halved for building"));
+		}
+
+		if (AOLCBuildingBase* Building = Cast<AOLCBuildingBase>(Entry.Actor.Get()))
+		{
+			FString ProductionSummary;
+			if (const AOLCResourceExtractor* Extractor = Cast<AOLCResourceExtractor>(Building))
+			{
+				const UEnum* ResourceEnum = StaticEnum<EOLCResourceType>();
+				ProductionSummary = FString::Printf(TEXT("Extracting %s at "), ResourceEnum ? *ResourceEnum->GetDisplayNameTextByValue(static_cast<int64>(Extractor->GetExtractedResourceType())).ToString() : TEXT("Resource"));
+			}
+			for (const FOLCResourceAmount& Output : Outputs)
+			{
+				const UEnum* ResourceEnum = StaticEnum<EOLCResourceType>();
+				ProductionSummary += FString::Printf(TEXT("+%.1f %s  "), Output.CurrentValue, ResourceEnum ? *ResourceEnum->GetDisplayNameTextByValue(static_cast<int64>(Output.ResourceType)).ToString() : TEXT("Resource"));
+			}
+			Building->ShowProduction(FText::FromString(ProductionSummary), bPowerDeficit);
 		}
 
 		// Add produced resources
@@ -1112,8 +1265,9 @@ void UOLCUIDataSubsystem::PerformProductionTick()
 
 	// Update tutorial objectives based on production (WP-104 Step 6)
 	UpdateTutorialProgress();
+	UpdateBuildingVisualization();
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Production tick complete — Energy produced: %.1f"), CumulativeEnergyProduced);
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Production tick complete — Energy produced: %.1f"), CumulativeEnergyProduced);
 }
 
 void UOLCUIDataSubsystem::UpdateResourceCounters()
@@ -1132,15 +1286,16 @@ void UOLCUIDataSubsystem::UpdateResourceCounters()
 
 		// Clamp to capacity
 		float MaxCap = GetMaxCapacity(Res.ResourceType);
+		Res.Capacity = MaxCap;
 		if (Res.Value > MaxCap)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[OLC] Resource %d overflow: %.1f / %.1f — production lost"),
+			UE_LOG(LogOLC, Warning, TEXT("[OLC] Resource %d overflow: %.1f / %.1f — production lost"),
 				(int32)Res.ResourceType, Res.Value, MaxCap);
 			Res.Value = MaxCap;
 		}
 
 		// Update pressure state
-		float Ratio = Res.Value / Res.Capacity;
+		float Ratio = Res.Capacity > 0.0f ? Res.Value / Res.Capacity : 0.0f;
 		if (Ratio >= 1.0f)
 			Res.PressureState = EOLCStoragePressure::Full;
 		else if (Ratio >= 0.85f)
@@ -1154,7 +1309,7 @@ void UOLCUIDataSubsystem::CalculateProductionRates()
 {
 	// Reset production rates
 	ProductionRates.Reset();
-	for (int32 i = 0; i < static_cast<int32>(EOLCResourceType::DarkMatterCrystals); ++i)
+	for (int32 i = 0; i <= static_cast<int32>(EOLCResourceType::DarkMatterCrystals); ++i)
 	{
 		EOLCResourceType ResourceType = static_cast<EOLCResourceType>(i);
 		ProductionRates.Emplace(ResourceType, 0.0f, 1000.0f, 0.0f);
@@ -1211,8 +1366,14 @@ void UOLCUIDataSubsystem::CheckPowerDeficit()
 	}
 }
 
-void UOLCUIDataSubsystem::ApplyBiomeModifiers(TArray<FOLCResourceAmount>& Outputs, EOLCBiomeType Biome) const
+void UOLCUIDataSubsystem::ApplyBiomeModifiers(TArray<FOLCResourceAmount>& Outputs, EOLCBiomeType Biome, const UOLCBuildingData* BuildingData) const
 {
+	if (BuildingData && !BuildingData->BiomeModifiers.IsEmpty())
+	{
+		const float Multiplier = BuildingData->GetBiomeMultiplier(Biome);
+		for (FOLCResourceAmount& Output : Outputs) Output.CurrentValue *= Multiplier;
+		return;
+	}
 	for (auto& Output : Outputs)
 	{
 		// Note: This is a simplified implementation.
@@ -1257,12 +1418,12 @@ void UOLCUIDataSubsystem::OnPowerDeficitStateChanged(bool bNewDeficit)
 
 	if (bNewDeficit)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] POWER DEFICIT DETECTED — consumption (%.1f) > production (%.1f)"),
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] POWER DEFICIT DETECTED — consumption (%.1f) > production (%.1f)"),
 			TotalPowerConsumption, TotalPowerProduction);
 	}
 	else
 	{
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Power Restored — production (%.1f) >= consumption (%.1f)"),
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Power Restored — production (%.1f) >= consumption (%.1f)"),
 			TotalPowerProduction, TotalPowerConsumption);
 	}
 }
@@ -1352,7 +1513,7 @@ void UOLCUIDataSubsystem::PopulateShipModules()
 		mod.IntegrityPercent = 1.0f;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Ship modules populated: %d available"), AvailableModules.Num());
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Ship modules populated: %d available"), AvailableModules.Num());
 }
 
 TArray<FOLCShipModuleViewData> UOLCUIDataSubsystem::GetInstalledModules(EOLCShipModuleCategory Category) const
@@ -1375,7 +1536,7 @@ bool UOLCUIDataSubsystem::CanInstallModule(UOLCShipModuleData* ModuleData) const
 	// Check TIR requirement
 	if (ModuleData->TIRTier > ColonyTIR)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Cannot install module — TIR requirement %d exceeds colony TIR %d"),
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Cannot install module — TIR requirement %d exceeds colony TIR %d"),
 			ModuleData->TIRTier, ColonyTIR);
 		return false;
 	}
@@ -1392,7 +1553,7 @@ void UOLCUIDataSubsystem::ApplyModuleEffects(UOLCShipModuleData* ModuleData)
 		case EOLCShipModuleCategory::Drives:
 			SetDriveTier(ModuleData->TIRTier);
 			SetDriveStatus(EOLCModuleState::Installed);
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Drive installed — tier %d"), ModuleData->TIRTier);
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Drive installed — tier %d"), ModuleData->TIRTier);
 			break;
 
 		case EOLCShipModuleCategory::Protection:
@@ -1401,16 +1562,16 @@ void UOLCUIDataSubsystem::ApplyModuleEffects(UOLCShipModuleData* ModuleData)
 				// Shield module
 				SetShieldStatus(EOLCModuleState::Installed);
 			}
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Protection module installed"));
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Protection module installed"));
 			break;
 
 		case EOLCShipModuleCategory::Storage:
 			AddStorageBonus(200);
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Storage module installed — +200 per resource"));
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Storage module installed — +200 per resource"));
 			break;
 
 		default:
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Module installed: %s"), *ModuleData->DisplayName.ToString());
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Module installed: %s"), *ModuleData->DisplayName.ToString());
 			break;
 	}
 }
@@ -1430,7 +1591,7 @@ bool UOLCUIDataSubsystem::InstallModule(UOLCShipModuleData* ModuleData)
 {
 	if (!ModuleData || !CanInstallModule(ModuleData))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] InstallModule: invalid or incompatible module"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] InstallModule: invalid or incompatible module"));
 		return false;
 	}
 
@@ -1438,7 +1599,7 @@ bool UOLCUIDataSubsystem::InstallModule(UOLCShipModuleData* ModuleData)
 	TArray<FOLCResourceAmount> Cost = ModuleData->RepairCost;
 	if (!CanAffordBuild(Cost))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] InstallModule: insufficient resources"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] InstallModule: insufficient resources"));
 		return false;
 	}
 
@@ -1460,7 +1621,7 @@ bool UOLCUIDataSubsystem::InstallModule(UOLCShipModuleData* ModuleData)
 	InstalledMod.IntegrityPercent = 1.0f;
 	InstalledModules.Add(InstalledMod);
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Module installed: %s"), *ModuleData->DisplayName.ToString());
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Module installed: %s"), *ModuleData->DisplayName.ToString());
 	return true;
 }
 
@@ -1468,7 +1629,7 @@ bool UOLCUIDataSubsystem::SwapModule(UOLCShipModuleData* NewModuleData)
 {
 	if (!NewModuleData || !CanInstallModule(NewModuleData))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] SwapModule: invalid or incompatible module"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] SwapModule: invalid or incompatible module"));
 		return false;
 	}
 
@@ -1477,7 +1638,7 @@ bool UOLCUIDataSubsystem::SwapModule(UOLCShipModuleData* NewModuleData)
 	{
 		if (InstalledModules[i].Category == NewModuleData->ModuleCategory)
 		{
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Swapped out module: %s"), *InstalledModules[i].DisplayName.ToString());
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Swapped out module: %s"), *InstalledModules[i].DisplayName.ToString());
 			InstalledModules.RemoveAt(i);
 			break;
 		}
@@ -1504,20 +1665,20 @@ bool UOLCUIDataSubsystem::RepairModule(EOLCShipModuleCategory Category)
 				Mod.State = EOLCModuleState::Installed;
 				Mod.IntegrityPercent = 1.0f;
 
-				UE_LOG(LogTemp, Log, TEXT("[OLC] Module repaired: %s"), *Mod.DisplayName.ToString());
+				UE_LOG(LogOLC, Log, TEXT("[OLC] Module repaired: %s"), *Mod.DisplayName.ToString());
 				return true;
 			}
 		}
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("[OLC] RepairModule: no damaged module found in category"));
+	UE_LOG(LogOLC, Warning, TEXT("[OLC] RepairModule: no damaged module found in category"));
 	return false;
 }
 
 void UOLCUIDataSubsystem::SetColonyTIR(int32 InTIR)
 {
 	ColonyTIR = FMath::Clamp(InTIR, 1, 5);
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Colony TIR set to: %d"), ColonyTIR);
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Colony TIR set to: %d"), ColonyTIR);
 }
 
 void UOLCUIDataSubsystem::UpdateModuleState(const FText& ModuleName, EOLCModuleState NewState, float NewIntegrity)
@@ -1528,7 +1689,7 @@ void UOLCUIDataSubsystem::UpdateModuleState(const FText& ModuleName, EOLCModuleS
 		{
 			AvailMod.State = NewState;
 			AvailMod.IntegrityPercent = NewIntegrity;
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Updated module state: %s -> %d"), *ModuleName.ToString(), (int32)NewState);
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Updated module state: %s -> %d"), *ModuleName.ToString(), (int32)NewState);
 			return;
 		}
 	}
@@ -1537,7 +1698,7 @@ void UOLCUIDataSubsystem::UpdateModuleState(const FText& ModuleName, EOLCModuleS
 void UOLCUIDataSubsystem::AddInstalledModule(const FOLCShipModuleViewData& Module)
 {
 	InstalledModules.Add(Module);
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Added installed module: %s"), *Module.DisplayName.ToString());
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Added installed module: %s"), *Module.DisplayName.ToString());
 }
 
 void UOLCUIDataSubsystem::RemoveInstalledModuleByCategory(EOLCShipModuleCategory Category)
@@ -1546,7 +1707,7 @@ void UOLCUIDataSubsystem::RemoveInstalledModuleByCategory(EOLCShipModuleCategory
 	{
 		if (InstalledModules[i].Category == Category)
 		{
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Removed installed module: %s"), *InstalledModules[i].DisplayName.ToString());
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Removed installed module: %s"), *InstalledModules[i].DisplayName.ToString());
 			InstalledModules.RemoveAt(i);
 			return;
 		}
@@ -1588,27 +1749,40 @@ void UOLCUIDataSubsystem::OnBuildingPlaced(AActor* BuildingActor, UOLCBuildingDa
 		if (LastCompletedObjectiveIndex < 3 && MissionObjectives.IsValidIndex(3))
 		{
 			MissionObjectives[3].State = EOLCProgressState::Complete;
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Tutorial: 'Build solar panel' objective completed"));
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Tutorial: 'Build solar panel' objective completed"));
 
 			if (MissionObjectives.IsValidIndex(4))
 			{
 				MissionObjectives[4].State = EOLCProgressState::Active;
-				UE_LOG(LogTemp, Log, TEXT("[OLC] Tutorial: Activated next objective"));
+				UE_LOG(LogOLC, Log, TEXT("[OLC] Tutorial: Activated next objective"));
 			}
+		}
+
+		// WP-129 Step 2 — post-placement hook: a Solar Array building was placed.
+		// Guarded so placing further solar arrays re-fires nothing.
+		UOLCTutorialSubsystem* Tutorial = GetGameInstance() ? GetGameInstance()->GetSubsystem<UOLCTutorialSubsystem>() : nullptr;
+		if (Tutorial && !Tutorial->IsObjectiveComplete(EOLCTutorialObjective::PlaceSolarArray))
+		{
+			Tutorial->CompleteObjective(EOLCTutorialObjective::PlaceSolarArray);
+			UE_LOG(LogOLC, Display, TEXT("[OLC] Tutorial: solar array placed — PlaceSolarArray objective done"));
 		}
 	}
 
-	// Check if this is a Mine — complete "Discover mineral deposit" objective (index 2)
+	// Complete the deposit objective only when the Mine actually connected to a resource tile.
 	if (BuildingName.Contains(TEXT("Mine")))
 	{
-		if (LastCompletedObjectiveIndex < 2 && MissionObjectives.IsValidIndex(2))
+		const AOLCResourceExtractor* Extractor = Cast<AOLCResourceExtractor>(BuildingActor);
+		if (Extractor && Extractor->HasConnectedResourceTile())
 		{
-			MissionObjectives[2].State = EOLCProgressState::Complete;
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Tutorial: 'Discover mineral deposit' objective completed"));
-
-			if (MissionObjectives.IsValidIndex(3))
+			for (FOLCMissionObjectiveViewData& Objective : MissionObjectives)
 			{
-				MissionObjectives[3].State = EOLCProgressState::Active;
+				if (Objective.ObjectiveName.ToString().Contains(TEXT("Discover mineral deposit"), ESearchCase::IgnoreCase))
+				{
+					Objective.Progress = Objective.TargetProgress;
+					Objective.State = EOLCProgressState::Complete;
+					UE_LOG(LogOLC, Log, TEXT("[OLC] Tutorial: 'Discover mineral deposit' objective completed"));
+					break;
+				}
 			}
 		}
 	}
@@ -1619,7 +1793,7 @@ void UOLCUIDataSubsystem::OnBuildingPlaced(AActor* BuildingActor, UOLCBuildingDa
 		if (MissionObjectives.IsValidIndex(1) && MissionObjectives[1].State == EOLCProgressState::Idle)
 		{
 			MissionObjectives[1].State = EOLCProgressState::Active;
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Tutorial: Activated 'Collect construction material'"));
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Tutorial: Activated 'Collect construction material'"));
 		}
 	}
 }
@@ -1635,7 +1809,7 @@ void UOLCUIDataSubsystem::UpdateTutorialProgress()
 		MissionObjectives[0].Progress = 1.0f;
 		MissionObjectives[0].State = EOLCProgressState::Complete;
 		LastCompletedObjectiveIndex = 0;
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Tutorial: 'Explore crash site' completed"));
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Tutorial: 'Explore crash site' completed"));
 
 		if (MissionObjectives.IsValidIndex(1))
 		{
@@ -1653,7 +1827,7 @@ void UOLCUIDataSubsystem::UpdateTutorialProgress()
 				MissionObjectives[1].Progress = 1.0f;
 				MissionObjectives[1].State = EOLCProgressState::Complete;
 				LastCompletedObjectiveIndex = 1;
-				UE_LOG(LogTemp, Log, TEXT("[OLC] Tutorial: 'Collect construction material' completed"));
+				UE_LOG(LogOLC, Log, TEXT("[OLC] Tutorial: 'Collect construction material' completed"));
 
 				if (MissionObjectives.IsValidIndex(2))
 				{
@@ -1674,7 +1848,7 @@ void UOLCUIDataSubsystem::UpdateTutorialProgress()
 			MissionObjectives[4].Progress = 1.0f;
 			MissionObjectives[4].State = EOLCProgressState::Complete;
 			LastCompletedObjectiveIndex = 4;
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Tutorial: 'Reach 10 Energy production' completed (cumulative: %.1f)"), CumulativeEnergyForTutorial);
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Tutorial: 'Reach 10 Energy production' completed (cumulative: %.1f)"), CumulativeEnergyForTutorial);
 		}
 		else
 		{
@@ -1682,8 +1856,6 @@ void UOLCUIDataSubsystem::UpdateTutorialProgress()
 		}
 	}
 
-	// Reset cumulative energy for next tick
-	CumulativeEnergyProduced = 0.0f;
 }
 
 // ---------------------------------------------------------------------------
@@ -1768,6 +1940,16 @@ bool UOLCUIDataSubsystem::GetBuildingProductionState(AActor* BuildingActor, bool
 
 	bIsProducing = false;
 	return false;
+}
+
+// ---------------------------------------------------------------------------
+// Alien Shield Generator (WP-125 Step 1)
+// ---------------------------------------------------------------------------
+
+void UOLCUIDataSubsystem::SetAlienShieldActive(bool bInActive)
+{
+	bAlienShieldActive = bInActive;
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Alien Shield %s"), bInActive ? TEXT("activated") : TEXT("deactivated"));
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -25,6 +25,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "OLC|Vehicle")
 	bool HasFuel() const { return CurrentFuel > 0.0f; }
 
+	UFUNCTION(BlueprintCallable, Category = "OLC|Vehicle")
+	void SetMoving(bool bNewMoving) { bIsMoving = bNewMoving; }
+
+	UFUNCTION(BlueprintCallable, Category = "OLC|Vehicle")
+	void SetInCombat(bool bNewInCombat) { bIsInCombat = bNewInCombat; }
+
+	UFUNCTION(BlueprintCallable, Category = "OLC|Vehicle")
+	void Refuel(float Amount);
+
 protected:
 	virtual void Tick(float DeltaTime) override;
 	virtual void BeginPlay() override;
@@ -39,4 +48,8 @@ private:
 
 	/** Accumulated time for fuel drain. */
 	float FuelAccumulator = 0.0f;
+
+	bool bFuelWarningIssued = false;
+	bool bIsMoving = false;
+	bool bIsInCombat = false;
 };

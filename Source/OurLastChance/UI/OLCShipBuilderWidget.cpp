@@ -1,4 +1,5 @@
 #include "OLCShipBuilderWidget.h"
+#include "OurLastChance.h"
 
 #include "Brushes/SlateDynamicImageBrush.h"
 #include "Widgets/Colors/SColorBlock.h"
@@ -76,7 +77,7 @@ void UOLCShipBuilderWidget::OnInstallClicked()
 	// Check TIR compatibility
 	if (Module.TIRTier > DataSubsystem->GetColonyTIR())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Cannot install %s — requires TIR %d, colony TIR is %d"),
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Cannot install %s — requires TIR %d, colony TIR is %d"),
 			*Module.DisplayName.ToString(), Module.TIRTier, DataSubsystem->GetColonyTIR());
 		return;
 	}
@@ -95,7 +96,7 @@ void UOLCShipBuilderWidget::OnInstallClicked()
 
 	if (bAlreadyHasModule)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Already have module in category %d — use SWAP instead"), (int32)Module.Category);
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Already have module in category %d — use SWAP instead"), (int32)Module.Category);
 		return;
 	}
 
@@ -103,7 +104,7 @@ void UOLCShipBuilderWidget::OnInstallClicked()
 	TArray<FOLCResourceAmount> Cost = Module.RepairCost;
 	if (!DataSubsystem->CanAffordBuild(Cost))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Insufficient resources to install %s"), *Module.DisplayName.ToString());
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Insufficient resources to install %s"), *Module.DisplayName.ToString());
 		return;
 	}
 
@@ -139,7 +140,7 @@ void UOLCShipBuilderWidget::OnInstallClicked()
 			break;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Installed module: %s (category: %d)"), *Module.DisplayName.ToString(), (int32)Module.Category);
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Installed module: %s (category: %d)"), *Module.DisplayName.ToString(), (int32)Module.Category);
 
 	// Refresh display
 	RefreshModuleCatalog();
@@ -156,7 +157,7 @@ void UOLCShipBuilderWidget::OnSwapClicked()
 	// Check TIR compatibility
 	if (NewModule.TIRTier > DataSubsystem->GetColonyTIR())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Cannot swap — requires TIR %d, colony TIR is %d"),
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Cannot swap — requires TIR %d, colony TIR is %d"),
 			NewModule.TIRTier, DataSubsystem->GetColonyTIR());
 		return;
 	}
@@ -167,7 +168,7 @@ void UOLCShipBuilderWidget::OnSwapClicked()
 	{
 		if (OldModule.Category == NewModule.Category)
 		{
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Swapped out module: %s"), *OldModule.DisplayName.ToString());
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Swapped out module: %s"), *OldModule.DisplayName.ToString());
 
 			// Get refund using helper method
 			TArray<FOLCResourceAmount> Refund = DataSubsystem->GetModuleRefund(OldModule);
@@ -187,7 +188,7 @@ void UOLCShipBuilderWidget::OnSwapClicked()
 	TArray<FOLCResourceAmount> Cost = NewModule.RepairCost;
 	if (!DataSubsystem->CanAffordBuild(Cost))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Insufficient resources to swap to %s"), *NewModule.DisplayName.ToString());
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Insufficient resources to swap to %s"), *NewModule.DisplayName.ToString());
 		return;
 	}
 
@@ -223,7 +224,7 @@ void UOLCShipBuilderWidget::OnSwapClicked()
 			break;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Swapped to module: %s (category: %d)"), *NewModule.DisplayName.ToString(), (int32)NewModule.Category);
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Swapped to module: %s (category: %d)"), *NewModule.DisplayName.ToString(), (int32)NewModule.Category);
 
 	// Refresh display
 	RefreshModuleCatalog();
@@ -251,7 +252,7 @@ void UOLCShipBuilderWidget::OnRepairClicked()
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] OnRepairClicked: no damaged module found in category %d"), (int32)SelectedCategory);
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] OnRepairClicked: no damaged module found in category %d"), (int32)SelectedCategory);
 	}
 }
 
@@ -312,11 +313,11 @@ TSharedRef<SWidget> UOLCShipBuilderWidget::BuildHullPanel()
 		if (FPaths::FileExists(ShipImagePath))
 		{
 			ShipBrush = MakeUnique<FSlateDynamicImageBrush>(ShipBrushName, FVector2D(280.0f, 320.0f));
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Ship Builder: Loaded crashed ship image from %s"), *ShipImagePath);
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Ship Builder: Loaded crashed ship image from %s"), *ShipImagePath);
 		}
 		else
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[OLC] Ship Builder: Crashed ship image not found — using placeholder"));
+			UE_LOG(LogOLC, Warning, TEXT("[OLC] Ship Builder: Crashed ship image not found — using placeholder"));
 		}
 		bShipLoaded = true;
 	}
@@ -731,7 +732,7 @@ void UOLCShipBuilderWidget::UpdateHullSlots()
 		? OLCStyleColors::ValidGreen
 		: OLCStyleColors::DangerRed;
 
-	UE_LOG(LogTemp, Verbose, TEXT("[OLC] Ship Builder: Drive=%d, Shield=%d"),
+	UE_LOG(LogOLC, Verbose, TEXT("[OLC] Ship Builder: Drive=%d, Shield=%d"),
 		(int32)DataSubsystem->GetDriveStatus(), (int32)DataSubsystem->GetShieldStatus());
 }
 

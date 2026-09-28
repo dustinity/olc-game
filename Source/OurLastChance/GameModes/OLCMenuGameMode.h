@@ -6,6 +6,7 @@
 #include "OLCMenuGameMode.generated.h"
 
 class UOLCFactionData;
+class UOLCCrashSequenceWidget;
 
 // ---------------------------------------------------------------------------
 // Game state enum
@@ -111,6 +112,9 @@ private:
 	/** Camera actor used during the crash sequence (side-view). */
 	UPROPERTY()
 	TObjectPtr<ACameraActor> SequenceCamera;
+
+	UPROPERTY()
+	TObjectPtr<UOLCCrashSequenceWidget> CrashSequenceWidget;
 
 	/** Whether the welcome screen has been shown at least once. */
 	UPROPERTY()

@@ -163,7 +163,7 @@ AOLCResourceExtractor::Tick()
 | `World/OLCInfrastructure.h/cpp` | **NEW** — Unit housing bonus, storage capacity, movement blocking |
 | `World/OLCProductionFacility.h/cpp` | **NEW** — Production queue with progress tracking |
 | `World/OLCDefenseStructure.h/cpp` | **NEW** — HP, attack range, damage per tick |
-| `Briefing/UE5/HOWTO/HOWTO_ADD_BUILDING.md` | Updated with real file paths, UPrimaryDataAsset pattern, biome modifiers, category subclass mapping table |
+| `OurLastChance/Briefing/UE5/HOWTO/HOWTO_ADD_BUILDING.md` | Updated with real file paths, UPrimaryDataAsset pattern, biome modifiers, category subclass mapping table |
 
 ### WP-03 (First Building: Mine PB-EX-01)
 
@@ -173,7 +173,7 @@ AOLCResourceExtractor::Tick()
 | `Core/OLCUIDataSubsystem.h` | Added `AddResource(EOLCResourceType, float)` BlueprintCallable method — bridge from building production to HUD |
 | `Core/OLCUIDataSubsystem.cpp` | Implemented `AddResource()` — increments ResourceCounters[] by Amount, clamped to capacity |
 | `World/OLCResourceExtractor.cpp` | Rewrote Tick() to use AddResource() instead of broken copy-based approach; proper production accumulator |
-| `Briefing/Buildings/Extraction/PB-EX-01-Mine/UE5.md` | Updated status: C++ build card + production tick done; DataAsset + Blueprint pending editor creation |
+| `OurLastChance/Briefing/buildings/Extraction/PB-EX-01-Mine/UE5.md` | Updated status: C++ build card + production tick done; DataAsset + Blueprint pending editor creation |
 
 ### WP-04 (Tier 1 Buildings: Starting Base Set — ×6)
 
@@ -182,7 +182,7 @@ AOLCResourceExtractor::Tick()
 | `Core/OLCUIDataSubsystem.cpp` | Added 6 Tier 1 buildings: Solar Array (2x1, 80 CM + 60 minerals, -5 power), Camp Barracks (2x2, 200 CM + 100 minerals), Habitation Module (2x2, 300 CM + 150 minerals + 50 survival), Wall Segment (1x1, 30 CM + 20 minerals), Gate (1x1, 80 CM + 50 minerals), Locker (1x1, 50 CM) |
 | `World/OLCPowerGenerator.h/cpp` | Added power production timer with biome multiplier support; Tick() feeds energy via AddResource(Energy) |
 | `World/OLCInfrastructure.h/cpp` | Added ToggleGate() for gate open/close state; footprint collision toggleable based on bBlocksMovement and bGateOpen |
-| 6× `Briefing/Buildings/*/UE5.md` | Updated status to IN_PROGRESS with C++ done / editor pending checklists |
+| 6× `OurLastChance/Briefing/buildings/*/UE5.md` | Updated status to IN_PROGRESS with C++ done / editor pending checklists |
 
 ### WP-08 (Crash Landing Sequence & Tutorial Flow)
 

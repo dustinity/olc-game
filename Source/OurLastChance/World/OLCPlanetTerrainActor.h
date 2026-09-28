@@ -118,6 +118,13 @@ private:
 	void UpdateSurfaceMeshCrossfade(const FLinearColor& Color);
 	void UpdatePropColorsCrossfade(const FLinearColor& BlockerColor);
 
+	// --- Biome ambient VFX hook (WP-126 step-9; append-only) ------------------
+	/** Stop the currently active biome ambient and start the new one via the VFX subsystem. */
+	void StartBiomeAmbientVFX(EOLCBiomeType NewBiome);
+
+	UPROPERTY()
+	TWeakObjectPtr<AActor> BiomeAmbientActor;
+
 	UPROPERTY()
 	TArray<FOLCTerrainTile> Tiles;
 

@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "Components/TimelineComponent.h"
+#include "Core/OLCUIDataSubsystem.h" // FOLCSquadDeploymentData
 #include "OLCMenuPlayerController.generated.h"
 
 class AOLCMenuGameMode;
@@ -27,6 +28,7 @@ enum class EOLCUIScreen : uint8
 	MainRTSHUD        UMETA(DisplayName = "Main RTS HUD"),
 	Keymap            UMETA(DisplayName = "Keymap"),
 	FactionSelect     UMETA(DisplayName = "Faction Select"),
+	ChampionSelect    UMETA(DisplayName = "Champion Select"),
 	ConstructionMode  UMETA(DisplayName = "Construction Mode"),
 	ColonyResourceNetwork UMETA(DisplayName = "Colony Resource Network"),
 	SolarSystem       UMETA(DisplayName = "Solar System"),
@@ -56,6 +58,7 @@ public:
 	void OpenMainRTSHUD();
 	void OpenKeymap();
 	void OpenFactionSelect();
+	void OpenChampionSelect();
 	void OpenConstructionMode();
 	void OpenColonyResourceNetwork();
 	void OpenSolarSystem();
@@ -65,6 +68,16 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "OLC|Campaign")
 	void ConfirmFactionSelection(const FString& FactionId);
+	UFUNCTION(BlueprintCallable, Category = "OLC|Campaign")
+	void ConfirmChampionSelection(const FString& ChampionId);
+
+	/** Bound to WBP_FactionSelect's Back button — closes it and returns to the welcome screen. */
+	UFUNCTION()
+	void HandleFactionSelectBack();
+
+	/** WP-130: bound to S09's OnSquadReady — confirms the squad on the pending expedition and routes to S08. */
+	UFUNCTION()
+	void HandleSquadReady(const FOLCSquadDeploymentData& SquadData);
 	void OpenDropshipRepair();
 	void OpenMothershipBuilder();
 	void OpenEquipment();
@@ -91,6 +104,9 @@ public:
 	/** Fallback: skip crash sequence, go straight to gameplay. */
 	void TransitionToGameplayDirect();
 
+	/** WP-129 Step 3 (test-only): dismiss the welcome screen and trigger OLCMenuGameMode::TransitionToGameplay deterministically for PIE verification (UOLCTutorialTestConfig). */
+	void TriggerTestTransition();
+
 	/** Return to test switcher. */
 	UFUNCTION(BlueprintCallable, Category = "OLC|UI")
 	void ShowTestSwitcher();
@@ -104,6 +120,7 @@ protected:
 private:
 	void EnsureMouseCursorVisible(UUserWidget* FocusWidget = nullptr);
 	void AddFullscreenWidget(UUserWidget* Widget, int32 ZOrder);
+	void AddCenteredWidget(UUserWidget* Widget, int32 ZOrder, const FVector2D& WidgetSize);
 
 	UPROPERTY()
 	TObjectPtr<UOLCWelcomeScreenWidget> WelcomeScreenInstance;
@@ -114,6 +131,9 @@ private:
 	/** Reference to the game mode for crash sequence control. */
 	UPROPERTY()
 	TObjectPtr<AOLCMenuGameMode> MenuGameMode;
+
+	/** WP-129 Step 3 (test-only): deferred TransitionToGameplay timer (UOLCTutorialTestConfig). */
+	FTimerHandle TestAutoTransitionTimer;
 
 	UPROPERTY()
 	TObjectPtr<UUserWidget> ActiveScreenInstance;
@@ -147,6 +167,9 @@ private:
 	void PanCameraLeft();
 	void PanCameraRight();
 	void PanCameraBy(const FVector& Delta);
+
+	/** WP-129 Step 2: E — context-sensitive interact. Near the crash-site wreck it inspects it (objective 1); otherwise, during gameplay with no overlay open, it hand-mines construction material via the manual-mining resource path (objective 2). */
+	void OnInteract();
 
 	// ---------------------------------------------------------------------------
 	// S11→S12 transition animation (zoom-out effect)

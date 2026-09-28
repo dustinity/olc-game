@@ -1,4 +1,5 @@
 #include "OLCSharedWidgets.h"
+#include "OurLastChance.h"
 
 #include "Brushes/SlateDynamicImageBrush.h"
 #include "Framework/Application/SlateApplication.h"
@@ -10,6 +11,7 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScaleBox.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
@@ -33,11 +35,17 @@ namespace OLCDesign
 	constexpr float ResourceCounterWidth = 140.0f;
 	constexpr float ResourceCounterHeight = 56.0f;
 
-	/** Shared asset path — relative to project dir via ../../UE5/Assets/UI/Shared Assets/Sliced */
+	/** Shared asset path — relative to project dir via ../../../Assets/UI/Shared Assets/Sliced */
 	FString SharedAssetPath(const FString& FileName)
 	{
 		return FPaths::ConvertRelativePathToFull(
-			FPaths::ProjectDir() / TEXT("../../UE5/Assets/UI/Shared Assets/Sliced") / FileName);
+			FPaths::ProjectDir() / TEXT("../../../Assets/UI/Shared Assets/Sliced") / FileName);
+	}
+
+	FString WelcomeScreenAssetPath(const FString& FileName)
+	{
+		return FPaths::ConvertRelativePathToFull(
+			FPaths::ProjectDir() / TEXT("../../../Assets/UI/WelcomeScreen") / FileName);
 	}
 
 	bool AssetExists(const FString& Path) { return FPaths::FileExists(Path); }
@@ -961,7 +969,7 @@ TSharedRef<SWidget> UOLCTestSwitcherWidget::RebuildWidget()
 		.AutoHeight()
 		[
 			SNew(STextBlock)
-			.Text(LOCTEXT("SwitcherInstructions", "Press F1-F10 to open screens. Press Esc to return here."))
+			.Text(LOCTEXT("SwitcherInstructions", "Press F1-F10 to open screens, or click any tile below (including flow-only screens with no hotkey). Press Esc to return here."))
 			.ColorAndOpacity(OLCStyleColors::TextDim)
 			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
 		];
@@ -969,6 +977,7 @@ TSharedRef<SWidget> UOLCTestSwitcherWidget::RebuildWidget()
 	// Screen buttons grid (2 columns)
 	TSharedRef<SHorizontalBox> TopRow = SNew(SHorizontalBox);
 	TSharedRef<SHorizontalBox> BottomRow = SNew(SHorizontalBox);
+	TSharedRef<SHorizontalBox> FlowRow = SNew(SHorizontalBox);
 
 	// F1-F5 in top row
 	for (int32 i = 0; i < 5; i++)
@@ -1022,6 +1031,29 @@ TSharedRef<SWidget> UOLCTestSwitcherWidget::RebuildWidget()
 			];
 	}
 
+	// Flow-only screens (11-16): no global gameplay hotkey — these are
+	// sequence-specific (campaign start, dungeon runs), not screens a player
+	// jumps to mid-session, so they're click-only here rather than bound to
+	// an F-key that would collide with real gameplay input.
+	for (int32 i = 0; i < 6; i++)
+	{
+		const FText Labels[6] = {
+			LOCTEXT("Screen_F11", "Keymap"),
+			LOCTEXT("Screen_F12", "Faction Select"),
+			LOCTEXT("Screen_F13", "Champion Select"),
+			LOCTEXT("Screen_F14", "Dungeon Entry (S07)"),
+			LOCTEXT("Screen_F15", "Squad Selection (S09)"),
+			LOCTEXT("Screen_F16", "Combat Results (S10)"),
+		};
+
+		FlowRow->AddSlot()
+			.FillWidth(1.0f)
+			.Padding(6.0f, 0.0f)
+			[
+				BuildScreenButton(Labels[i], FText::GetEmpty(), i + 11)
+			];
+	}
+
 	Content->AddSlot()
 		.AutoHeight()
 		.Padding(0.0f, 12.0f, 0.0f, 8.0f)
@@ -1029,7 +1061,12 @@ TSharedRef<SWidget> UOLCTestSwitcherWidget::RebuildWidget()
 
 	Content->AddSlot()
 		.AutoHeight()
+		.Padding(0.0f, 0.0f, 0.0f, 8.0f)
 		[ BottomRow ];
+
+	Content->AddSlot()
+		.AutoHeight()
+		[ FlowRow ];
 
 	return SNew(SScaleBox)
 		.Stretch(EStretch::ScaleToFit)
@@ -1116,14 +1153,16 @@ TSharedRef<SWidget> UOLCTestSwitcherWidget::BuildScreenButton(const FText& Label
 
 FReply UOLCTestSwitcherWidget::OnScreenSelect(int32 ScreenIndex)
 {
-	UE_LOG(LogTemp, Display, TEXT("[OLC] TestSwitcher: Screen %d selected"), ScreenIndex);
+	UE_LOG(LogOLC, Display, TEXT("[OLC] TestSwitcher: Screen %d selected"), ScreenIndex);
 
 	// Forward to the player controller so it opens the right screen.
 	if (APlayerController* PC = GetOwningPlayer())
 	{
 		if (AOLCMenuPlayerController* MenuPC = Cast<AOLCMenuPlayerController>(PC))
 		{
-			// ScreenIndex 1-10 maps to F1-F10 enum values.
+			// ScreenIndex 1-10 maps to the F1-F10 hotkeys; 11-16 are the
+			// flow-only screens exposed as switcher tiles only (see FlowRow
+			// in RebuildWidget).
 			EOLCUIScreen TargetScreen = EOLCUIScreen::None;
 			switch (ScreenIndex)
 			{
@@ -1137,8 +1176,16 @@ FReply UOLCTestSwitcherWidget::OnScreenSelect(int32 ScreenIndex)
 				case 8: TargetScreen = EOLCUIScreen::DropshipRepair; break;
 				case 9: TargetScreen = EOLCUIScreen::MothershipBuilder; break;
 				case 10: TargetScreen = EOLCUIScreen::Equipment; break;
+				case 11: TargetScreen = EOLCUIScreen::Keymap; break;
+				case 12: TargetScreen = EOLCUIScreen::FactionSelect; break;
+				case 13: TargetScreen = EOLCUIScreen::ChampionSelect; break;
+				case 14: TargetScreen = EOLCUIScreen::DungeonEntry; break;
+				case 15: TargetScreen = EOLCUIScreen::SquadSelection; break;
+				case 16: TargetScreen = EOLCUIScreen::CombatResults; break;
 				default: return FReply::Unhandled();
 			}
+
+			RemoveFromParent();
 			MenuPC->OpenUIScreen(TargetScreen);
 		}
 	}
@@ -1161,72 +1208,89 @@ UOLCKeymapWidget::UOLCKeymapWidget(const FObjectInitializer& ObjectInitializer)
 
 TSharedRef<SWidget> UOLCKeymapWidget::RebuildWidget()
 {
+	const FString KeymapPanelPath = OLCDesign::WelcomeScreenAssetPath(TEXT("Panel_Keymap.png"));
+	if (OLCDesign::AssetExists(KeymapPanelPath))
+	{
+		KeymapPanelBrush = MakeShared<FSlateDynamicImageBrush>(FName(*KeymapPanelPath), FVector2D(820.0f, 610.0f));
+	}
+
 	TSharedRef<SVerticalBox> Rows = SNew(SVerticalBox);
-	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_B", "B"), LOCTEXT("Keymap_Build", "Build"), LOCTEXT("Keymap_BuildDetail", "Open construction mode")) ];
-	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_R", "R"), LOCTEXT("Keymap_Research", "Research"), LOCTEXT("Keymap_ResearchDetail", "Open research tree")) ];
-	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_M", "M"), LOCTEXT("Keymap_Mothership", "Mothership Builder"), LOCTEXT("Keymap_MothershipDetail", "Place and upgrade ship modules")) ];
-	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_F1", "F1"), LOCTEXT("Keymap_Keymap", "Keymap"), LOCTEXT("Keymap_KeymapDetail", "Show this shortcut menu")) ];
-	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_Esc", "Esc"), LOCTEXT("Keymap_Close", "Close"), LOCTEXT("Keymap_CloseDetail", "Return to the UI switcher")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_H", "H"), LOCTEXT("Keymap_Keymap", "Keymap"), LOCTEXT("Keymap_KeymapDetail", "Toggle this shortcut popup")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_Esc", "Esc"), LOCTEXT("Keymap_Close", "Close / Cancel"), LOCTEXT("Keymap_CloseDetail", "Close keymap or cancel construction")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_F1", "F1"), LOCTEXT("Keymap_MainHUD", "Main HUD"), LOCTEXT("Keymap_MainHUDDetail", "Toggle main RTS HUD; opens keymap before gameplay")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_MouseLeft", "Left Mouse"), LOCTEXT("Keymap_SelectConfirm", "Select / Confirm"), LOCTEXT("Keymap_SelectConfirmDetail", "Select units or confirm build placement")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_MouseRight", "Right Mouse"), LOCTEXT("Keymap_Move", "Move Order"), LOCTEXT("Keymap_MoveDetail", "Move selected ground unit")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_Space", "Space"), LOCTEXT("Keymap_SimSpeed", "Simulation Speed"), LOCTEXT("Keymap_SimSpeedDetail", "Cycle paused, normal, and fast speed")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_B", "B / F2"), LOCTEXT("Keymap_Build", "Build"), LOCTEXT("Keymap_BuildDetail", "Open construction mode")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_R", "R"), LOCTEXT("Keymap_RotateResearch", "Rotate / Research"), LOCTEXT("Keymap_RotateResearchDetail", "Rotate build placement; open research in menu controller")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_M", "M / F9"), LOCTEXT("Keymap_Mothership", "Mothership Builder"), LOCTEXT("Keymap_MothershipDetail", "Toggle ship builder / place and upgrade modules")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_E", "E"), LOCTEXT("Keymap_Interact", "Interact"), LOCTEXT("Keymap_InteractDetail", "Inspect the wreck or hand-mine construction material")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_F3", "F3"), LOCTEXT("Keymap_ColonyNetwork", "Colony Network"), LOCTEXT("Keymap_ColonyNetworkDetail", "Open colony resource network")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_F4", "F4"), LOCTEXT("Keymap_SolarSystem", "Solar System"), LOCTEXT("Keymap_SolarSystemDetail", "Open solar system map")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_F5", "F5"), LOCTEXT("Keymap_GalaxyMap", "Galaxy Map"), LOCTEXT("Keymap_GalaxyMapDetail", "Open galaxy map")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_F6", "F6"), LOCTEXT("Keymap_TacticalDungeon", "Tactical Dungeon"), LOCTEXT("Keymap_TacticalDungeonDetail", "Open tactical dungeon screen")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_F8", "F8"), LOCTEXT("Keymap_DropshipRepair", "Dropship Repair"), LOCTEXT("Keymap_DropshipRepairDetail", "Open dropship repair screen")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_F10", "F10"), LOCTEXT("Keymap_Equipment", "Equipment"), LOCTEXT("Keymap_EquipmentDetail", "Open equipment screen")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_1to8", "1 - 8"), LOCTEXT("Keymap_Biome", "Biome Preview"), LOCTEXT("Keymap_BiomeDetail", "Switch the terrain biome material")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_G", "G"), LOCTEXT("Keymap_RenderMode", "Terrain Render Mode"), LOCTEXT("Keymap_RenderModeDetail", "Toggle surface mesh / debug tile colors")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_T", "T"), LOCTEXT("Keymap_Regenerate", "Regenerate Terrain"), LOCTEXT("Keymap_RegenerateDetail", "Reroll procedural terrain")) ];
+	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_Arrows", "Arrow Keys"), LOCTEXT("Keymap_PanCamera", "Pan Camera"), LOCTEXT("Keymap_PanCameraDetail", "Move the tactical camera")) ];
 	Rows->AddSlot().AutoHeight()[ BuildKeyRow(LOCTEXT("Keymap_Wheel", "Mouse Wheel"), LOCTEXT("Keymap_Zoom", "Zoom"), LOCTEXT("Keymap_ZoomDetail", "Adjust tactical camera distance")) ];
 
-	return SNew(SScaleBox)
-		.Stretch(EStretch::ScaleToFit)
+	return SNew(SBox)
+		.WidthOverride(820.0f)
+		.HeightOverride(610.0f)
 		[
 			SNew(SOverlay)
 			+ SOverlay::Slot()
 			[
-				SNew(SBorder)
-				.BorderBackgroundColor(OLCStyleColors::OverlayBG)
+				SNew(SImage)
+				.Image(KeymapPanelBrush.IsValid() ? KeymapPanelBrush.Get() : nullptr)
 			]
 			+ SOverlay::Slot()
-			.HAlign(HAlign_Center)
-			.VAlign(VAlign_Center)
 			[
-				SNew(SBox)
-				.WidthOverride(560.0f)
+				SNew(SBorder)
+				.Visibility(KeymapPanelBrush.IsValid() ? EVisibility::Collapsed : EVisibility::Visible)
+				.BorderBackgroundColor(OLCStyleColors::DarkSteel)
+			]
+			+ SOverlay::Slot()
+			.Padding(FMargin(68.0f, 58.0f, 68.0f, 52.0f))
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()
 				[
-					SNew(SBorder)
-					.BorderBackgroundColor(OLCStyleColors::DarkSteel)
-					.Padding(FMargin(24.0f))
+					SNew(STextBlock)
+					.Text(LOCTEXT("KeymapTitle", "KEYMAP"))
+					.ColorAndOpacity(OLCStyleColors::TextWhite)
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 30))
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 7.0f, 0.0f, 10.0f)
+				[
+					SNew(SColorBlock).Color(OLCStyleColors::PrimaryOrange).Size(FVector2D(1.0f, 2.0f))
+				]
+				+ SVerticalBox::Slot().FillHeight(1.0f)
+				[
+					SNew(SScrollBox)
+					+ SScrollBox::Slot()
 					[
-						SNew(SOverlay)
-						+ SOverlay::Slot()
-						.VAlign(VAlign_Top)
-						.HAlign(HAlign_Fill)
-						[
-							SNew(SColorBlock).Color(OLCStyleColors::TacticalBlue).Size(FVector2D(1.0f, 3.0f))
-						]
-						+ SOverlay::Slot()
-						.Padding(FMargin(0.0f, 18.0f, 0.0f, 0.0f))
-						[
-							SNew(SVerticalBox)
-							+ SVerticalBox::Slot().AutoHeight()
-							[
-								SNew(STextBlock)
-								.Text(LOCTEXT("KeymapTitle", "KEYMAP"))
-								.ColorAndOpacity(OLCStyleColors::PrimaryOrange)
-								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 24))
-							]
-							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 14.0f)
-							[
-								SNew(SColorBlock).Color(OLCStyleColors::BorderGray).Size(FVector2D(1.0f, 1.0f))
-							]
-							+ SVerticalBox::Slot().AutoHeight()
-							[
-								Rows
-							]
-						]
+						Rows
 					]
 				]
 			]
 		];
 }
 
+void UOLCKeymapWidget::ReleaseSlateResources(bool bReleaseChildren)
+{
+	Super::ReleaseSlateResources(bReleaseChildren);
+	KeymapPanelBrush.Reset();
+}
+
 TSharedRef<SWidget> UOLCKeymapWidget::BuildKeyRow(const FText& KeyLabel, const FText& ActionLabel, const FText& DetailLabel)
 {
 	return SNew(SBorder)
-		.BorderBackgroundColor(OLCStyleColors::CharcoalGray)
-		.Padding(FMargin(12.0f, 8.0f))
+		.BorderBackgroundColor(FLinearColor(0.18f, 0.22f, 0.26f, 0.72f))
+		.Padding(FMargin(12.0f, 6.0f))
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().AutoWidth()

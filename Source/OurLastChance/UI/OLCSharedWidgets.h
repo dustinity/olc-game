@@ -330,7 +330,9 @@ public:
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
+	virtual void ReleaseSlateResources(bool bReleaseChildren) override;
 
 private:
 	TSharedRef<SWidget> BuildKeyRow(const FText& KeyLabel, const FText& ActionLabel, const FText& DetailLabel);
+	TSharedPtr<struct FSlateDynamicImageBrush> KeymapPanelBrush;
 };

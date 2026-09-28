@@ -1,4 +1,5 @@
 #include "OLCTerrainDemoGameMode.h"
+#include "OurLastChance.h"
 
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
@@ -17,7 +18,7 @@ void AOLCTerrainDemoGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 
-	UE_LOG(LogTemp, Display, TEXT("[OLC] Terrain Demo started — keys 1-8 switch biome, G toggles debug, T regenerates"));
+	UE_LOG(LogOLC, Display, TEXT("[OLC] Terrain Demo started — keys 1-8 switch biome, G toggles debug, T regenerates"));
 
 	APlayerController* PC = GetWorld()->GetFirstPlayerController();
 	if (PC)
@@ -47,10 +48,10 @@ void AOLCTerrainDemoGameMode::SetupRTSCamera(APlayerController* PC)
 
 		PC->SetViewTargetWithBlend(RTSCamera, 0.5f);
 
-		UE_LOG(LogTemp, Log, TEXT("[OLC] 45-degree RTS camera placed above terrain center"));
+		UE_LOG(LogOLC, Log, TEXT("[OLC] 45-degree RTS camera placed above terrain center"));
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Failed to spawn RTS camera for Terrain Demo"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Failed to spawn RTS camera for Terrain Demo"));
 	}
 }

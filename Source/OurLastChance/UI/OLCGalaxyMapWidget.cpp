@@ -1,4 +1,5 @@
 #include "OLCGalaxyMapWidget.h"
+#include "OurLastChance.h"
 
 #include "Brushes/SlateDynamicImageBrush.h"
 #include "Misc/Paths.h"
@@ -11,6 +12,7 @@
 #include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Core/OLCUIDataSubsystem.h"
+#include "Core/OLCNavigationSubsystem.h"
 #include "Player/OLCMenuPlayerController.h"
 
 #include "UI/OLCSharedWidgets.h" // OLCStyleColors
@@ -25,13 +27,13 @@ namespace GalaxyAssetPath
 	FString PlanetMarker(const FString& FileName)
 	{
 		return FPaths::ConvertRelativePathToFull(
-			FPaths::ProjectDir() / TEXT("../../UE5/Assets/UI/Galaxy System UI/Assets") / FileName);
+			FPaths::ProjectDir() / TEXT("../../../Assets/UI/Galaxy System UI/Assets") / FileName);
 	}
 
 	FString NavMarker(const FString& FileName)
 	{
 		return FPaths::ConvertRelativePathToFull(
-			FPaths::ProjectDir() / TEXT("../../UE5/Assets/UI/Galaxy System UI/Assets") / FileName);
+			FPaths::ProjectDir() / TEXT("../../../Assets/UI/Galaxy System UI/Assets") / FileName);
 	}
 
 	bool AssetExists(const FString& Path) { return FPaths::FileExists(Path); }
@@ -45,7 +47,10 @@ UOLCGalaxyMapWidget::UOLCGalaxyMapWidget(const FObjectInitializer& ObjectInitial
 TSharedRef<SWidget> UOLCGalaxyMapWidget::RebuildWidget()
 {
 	if (UGameInstance* GI = GetWorld()->GetGameInstance())
+	{
 		ResourceSubsystem = GI->GetSubsystem<UOLCUIDataSubsystem>();
+		NavigationSubsystem = GI->GetSubsystem<UOLCNavigationSubsystem>();
+	}
 
 	InitializeGalaxyData();
 
@@ -89,8 +94,8 @@ TSharedRef<SWidget> UOLCGalaxyMapWidget::BuildGalaxyCanvas()
 	{
 		if (!Route.FromSystem || !Route.ToSystem) continue;
 
-		FVector2d FromPos = Route.FromSystem->Position * CanvasSize;
-		FVector2d ToPos   = Route.ToSystem->Position   * CanvasSize;
+		FVector2D FromPos = Route.FromSystem->Position * CanvasSize;
+		FVector2D ToPos   = Route.ToSystem->Position   * CanvasSize;
 
 		float DX = ToPos.X - FromPos.X;
 		float DY = ToPos.Y - FromPos.Y;
@@ -118,7 +123,7 @@ TSharedRef<SWidget> UOLCGalaxyMapWidget::BuildGalaxyCanvas()
 
 	// Draw galaxy center (objective marker).
 	Canvas->AddSlot()
-		.Offset(FMargin((GalaxyCenter - FVector2d(30.0f, 30.0f)).X, (GalaxyCenter - FVector2d(30.0f, 30.0f)).Y, 0.0f, 0.0f)).AutoSize(true)
+		.Offset(FMargin((GalaxyCenter - FVector2D(30.0f, 30.0f)).X, (GalaxyCenter - FVector2D(30.0f, 30.0f)).Y, 0.0f, 0.0f)).AutoSize(true)
 		[
 			SNew(SBox)
 			.WidthOverride(60.0f)
@@ -135,12 +140,12 @@ TSharedRef<SWidget> UOLCGalaxyMapWidget::BuildGalaxyCanvas()
 	for (int32 i = 0; i < Systems.Num(); i++)
 	{
 		auto& System = Systems[i];
-		FVector2d Pos = System.Position * CanvasSize;
+		FVector2D Pos = System.Position * CanvasSize;
 		float Radius = System.bVisited ? 18.0f : (System.bReachable ? 14.0f : 12.0f);
 
 		System.Position = Pos; // Store screen position for detail panel
 		Canvas->AddSlot()
-			.Offset(FMargin((Pos - FVector2d(Radius, Radius)).X, (Pos - FVector2d(Radius, Radius)).Y, 0.0f, 0.0f)).AutoSize(true)
+			.Offset(FMargin((Pos - FVector2D(Radius, Radius)).X, (Pos - FVector2D(Radius, Radius)).Y, 0.0f, 0.0f)).AutoSize(true)
 			[ BuildSystemNode(System) ];
 	}
 
@@ -266,6 +271,11 @@ TSharedRef<SWidget> UOLCGalaxyMapWidget::BuildDetailPanel()
 		}
 	}
 
+	bool bCanWarp = !System.bVisited && System.bReachable && NavigationSubsystem;
+	FText WarpBtnLabel = LOCTEXT("Btn_Warp", "WARP");
+	if (System.bVisited)        WarpBtnLabel = LOCTEXT("Btn_Current", "CURRENT");
+	else if (!System.bReachable) WarpBtnLabel = LOCTEXT("Btn_Unreachable", "UNREACHABLE");
+
 	return SNew(SBorder)
 		.BorderBackgroundColor(FLinearColor(0.006f, 0.012f, 0.016f, 0.98f))
 		.Padding(FMargin(16.0f))
@@ -304,6 +314,20 @@ TSharedRef<SWidget> UOLCGalaxyMapWidget::BuildDetailPanel()
 					[ SNew(STextBlock).Text(FText::FromString(*ConnectedSystems))
 						.ColorAndOpacity(OLCStyleColors::TextWhite).Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
 						.AutoWrapText(true) ]
+					// Warp button
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 0.0f)
+					[
+						SNew(SButton)
+						.ButtonStyle(FCoreStyle::Get(), "NoBorder")
+						.OnClicked_Lambda([this]() -> FReply { WarpToSelectedSystem(); return FReply::Handled(); })
+						.IsEnabled(bCanWarp)
+						[ SNew(SBorder)
+							.BorderBackgroundColor(bCanWarp ? OLCStyleColors::PrimaryOrange : OLCStyleColors::GunmetalBlack)
+							.Padding(FMargin(16.0f, 8.0f))
+							[ SNew(STextBlock).Text(WarpBtnLabel)
+								.ColorAndOpacity(bCanWarp ? OLCStyleColors::TextWhite : OLCStyleColors::TextDim)
+								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12)) ] ]
+					]
 				]
 			]
 		];
@@ -314,87 +338,84 @@ void UOLCGalaxyMapWidget::InitializeGalaxyData()
 	Systems.Reset();
 	Routes.Reset();
 
-	// Generate galaxy systems in a ring pattern around center.
-	TArray<FText> SystemNames = {
-		FText::FromString(TEXT("Home System")),     // Current system (center-ish)
-		FText::FromString(TEXT("Kepler Reach")),     // Ring 1
-		FText::FromString(TEXT("Vega Frontier")),    // Ring 1
-		FText::FromString(TEXT("Orion Belt")),       // Ring 2
-		FText::FromString(TEXT("Cygnus Deep")),      // Ring 2
-		FText::FromString(TEXT("Lyra Outpost")),     // Ring 3
-		FText::FromString(TEXT("Draco Core")),       // Ring 3
-		FText::FromString(TEXT("Andromeda Gate")),   // Ring 4
-		FText::FromString(TEXT("Galactic Center"))   // Objective (center)
-	};
+	if (!NavigationSubsystem) return;
 
-	TArray<float> Distances = { 0.15f, 0.25f, 0.30f, 0.40f, 0.45f, 0.55f, 0.60f, 0.70f, 0.85f };
-	TArray<int32> TIRs = { 1, 1, 2, 2, 3, 3, 4, 4, 5 };
+	const TArray<FOLCGalaxyCluster> Clusters = NavigationSubsystem->GetOrGenerateGalaxyClusters();
+	const int32 CurrentID = NavigationSubsystem->GetCurrentSystemID();
 
-	// Position systems in a spiral/ring pattern.
-	float AngleStep = 2.0f * PI / (SystemNames.Num() - 1);
-	for (int32 i = 0; i < SystemNames.Num(); i++)
+	// Clusters are positioned in canvas-space spiral coordinates (see
+	// UOLCNavigationSubsystem::GetOrGenerateGalaxyClusters); normalize to the
+	// 0-1 range BuildGalaxyCanvas expects (it multiplies by CanvasSize itself).
+	FVector2D MinPos(TNumericLimits<double>::Max(), TNumericLimits<double>::Max());
+	FVector2D MaxPos(TNumericLimits<double>::Lowest(), TNumericLimits<double>::Lowest());
+	for (const FOLCGalaxyCluster& Cluster : Clusters)
+	{
+		MinPos.X = FMath::Min(MinPos.X, (double)Cluster.Position.X);
+		MinPos.Y = FMath::Min(MinPos.Y, (double)Cluster.Position.Y);
+		MaxPos.X = FMath::Max(MaxPos.X, (double)Cluster.Position.X);
+		MaxPos.Y = FMath::Max(MaxPos.Y, (double)Cluster.Position.Y);
+	}
+	const double SpanX = FMath::Max(MaxPos.X - MinPos.X, 1.0);
+	const double SpanY = FMath::Max(MaxPos.Y - MinPos.Y, 1.0);
+
+	for (const FOLCGalaxyCluster& Cluster : Clusters)
 	{
 		FOLCGalaxySystem System;
-		System.SystemName = SystemNames[i];
-		System.DistanceFromCenter = Distances[i];
-		System.TIR = TIRs[i];
-
-		if (i == 0)
-		{
-			// Home system near center.
-			System.Position = FVector2d(0.15f, 0.15f);
-		}
-		else
-		{
-			// Spiral pattern.
-			float Angle = (i - 1) * AngleStep;
-			System.Position.X = 0.5f + FMath::Cos(Angle) * System.DistanceFromCenter * 0.8f;
-			System.Position.Y = 0.5f + FMath::Sin(Angle) * System.DistanceFromCenter * 0.8f;
-		}
-
-		// Home system is visited and reachable.
-		if (i == 0)
-		{
-			System.bVisited = true;
-			System.bReachable = true;
-		}
-		else if (i <= 2)
-		{
-			// Ring 1 systems are reachable from home.
-			System.bReachable = true;
-		}
-
+		System.SystemName = Cluster.ClusterName;
+		System.ClusterID = Cluster.ClusterID;
+		System.TIR = FMath::Clamp(1 + Cluster.ClusterID / 2, 1, 5);
+		System.Position.X = (Cluster.Position.X - MinPos.X) / SpanX;
+		System.Position.Y = (Cluster.Position.Y - MinPos.Y) / SpanY;
+		System.DistanceFromCenter = FVector2D::Distance(System.Position, FVector2D(0.5, 0.5));
+		System.bVisited = (Cluster.ClusterID == CurrentID);
 		Systems.Add(System);
 	}
 
-	// Create warp routes between adjacent systems.
-	for (int32 i = 0; i < Systems.Num() - 1; i++)
+	// Warp routes: match by ClusterName against the systems just built, and
+	// mark reachable when the player can currently afford the fuel cost.
+	int32 CurrentFuel = 0;
+	if (ResourceSubsystem)
 	{
+		for (const auto& Res : ResourceSubsystem->GetResourceCounters())
+			if (Res.ResourceType == EOLCResourceType::Fuel)
+				CurrentFuel = FMath::RoundToInt(Res.Value);
+	}
+
+	for (const FOLCSolarWarpRoute& NavRoute : NavigationSubsystem->GetWarpRoutes())
+	{
+		FOLCGalaxySystem* FromSys = Systems.FindByPredicate([&](const FOLCGalaxySystem& S) { return S.SystemName.EqualTo(NavRoute.FromSystem); });
+		FOLCGalaxySystem* ToSys   = Systems.FindByPredicate([&](const FOLCGalaxySystem& S) { return S.SystemName.EqualTo(NavRoute.ToSystem); });
+		if (!FromSys || !ToSys) continue;
+
+		if (FromSys->bVisited && NavRoute.FuelCost <= CurrentFuel)
+			ToSys->bReachable = true;
+
 		FOLCWarpRoute Route;
-		Route.FromSystem = &Systems[i];
-		Route.ToSystem   = &Systems[i + 1];
-		Route.FuelCost = 500 * (i + 1); // Scales with distance
-
+		Route.FromSystem = FromSys;
+		Route.ToSystem = ToSys;
+		Route.FuelCost = NavRoute.FuelCost;
 		Routes.Add(Route);
-
-		// Also add reverse route.
-		FOLCWarpRoute ReverseRoute;
-		ReverseRoute.FromSystem = &Systems[i + 1];
-		ReverseRoute.ToSystem   = &Systems[i];
-		ReverseRoute.FuelCost = 500 * (i + 1);
-
-		Routes.Add(ReverseRoute);
 	}
+}
 
-	// Add some cross-routes for variety.
-	if (Systems.Num() >= 4)
+void UOLCGalaxyMapWidget::WarpToSelectedSystem()
+{
+	if (!NavigationSubsystem) return;
+	if (SelectedSystemIndex < 0 || SelectedSystemIndex >= Systems.Num()) return;
+
+	const FOLCGalaxySystem& Target = Systems[SelectedSystemIndex];
+	if (Target.bVisited) return;
+	if (!Target.bReachable) return;
+
+	if (!NavigationSubsystem->TryPayFuelAndTravel(Target.ClusterID))
 	{
-		FOLCWarpRoute CrossRoute;
-		CrossRoute.FromSystem = &Systems[0];
-		CrossRoute.ToSystem   = &Systems[3];
-		CrossRoute.FuelCost = 800;
-		Routes.Add(CrossRoute);
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Warp to %s failed (insufficient fuel)"), *Target.SystemName.ToString());
+		return;
 	}
+
+	UE_LOG(LogOLC, Display, TEXT("[OLC] Warped to system: %s (cluster %d)"), *Target.SystemName.ToString(), Target.ClusterID);
+	InitializeGalaxyData();
+	InvalidateLayoutAndVolatility();
 }
 
 void UOLCGalaxyMapWidget::ReleaseSlateResources(bool bReleaseChildren)

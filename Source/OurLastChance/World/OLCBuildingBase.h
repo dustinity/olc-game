@@ -7,6 +7,8 @@
 
 class UStaticMeshComponent;
 class UBoxComponent;
+class UTextRenderComponent;
+class UNiagaraComponent;
 
 /**
  * Base actor for all planet buildings.
@@ -48,6 +50,23 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "OLC|Building")
 	void SetPowered(bool bNewPowered);
 
+	UFUNCTION(BlueprintCallable, Category = "OLC|Building|Production")
+	void ShowProduction(const FText& ProductionText, bool bDeficit);
+
+	// --- VFX integration hooks (WP-126 step-7; append-only) ------------------
+
+	/** Play the one-shot building destruction debris burst at this building's location. */
+	UFUNCTION(BlueprintCallable, Category = "OLC|Building|VFX")
+	void PlayDestructionVFX();
+
+	/** Attach a looping construction progress glow to SceneRoot. No-op if already active. */
+	UFUNCTION(BlueprintCallable, Category = "OLC|Building|VFX")
+	void StartConstructionGlow();
+
+	/** Detach and destroy the construction glow component if active. No-op if not glowing. */
+	UFUNCTION(BlueprintCallable, Category = "OLC|Building|VFX")
+	void StopConstructionGlow();
+
 protected:
 	/** Scene root component. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Building|Components")
@@ -60,6 +79,9 @@ protected:
 	/** Collision footprint for placement overlap checks. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Building|Components")
 	TObjectPtr<UBoxComponent> Footprint;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Building|Components")
+	TObjectPtr<UTextRenderComponent> ProductionTextComponent;
 
 	/** Configurable building data — set in constructor or editor. */
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Building|Data")
@@ -90,4 +112,10 @@ protected:
 	{
 		return BuildingData.GetBiomeMultiplier(CurrentBiome);
 	}
+
+	// --- VFX integration state (WP-126 step-7; append-only) ------------------
+
+	/** Active construction glow component attached to SceneRoot (null when not glowing). */
+	UPROPERTY(Transient)
+	TObjectPtr<UNiagaraComponent> ConstructionGlow;
 };

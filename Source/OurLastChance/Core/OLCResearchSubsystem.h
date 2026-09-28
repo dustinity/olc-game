@@ -4,6 +4,8 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Core/OLCTechData.h"
 #include "Core/OLCResourceTypes.h"
+#include "Core/OLCFactionData.h"
+#include "Core/OLCChampionData.h"
 #include "OLCResearchSubsystem.generated.h"
 
 /** Delegate fired when a tech completes research. */
@@ -92,6 +94,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "OLC|Research")
 	bool IsBuildCardUnlocked(const FString& BuildCardName) const;
 
+	/** True if some tech (via RegisterBuildCardUnlock() or UnlocksBuildCardName) names this card at all — i.e. it's research-gated. A card nobody references is never gated and stays available by default. */
+	UFUNCTION(BlueprintPure, Category = "OLC|Research")
+	bool IsBuildCardNameReferenced(const FString& BuildCardName) const;
+
 	// -----------------------------------------------------------------------
 	// Core ring auto-unlock — call at game start
 	// -----------------------------------------------------------------------
@@ -102,6 +108,35 @@ public:
 	/** Register the starter tech topics (built-in defaults). Call once at game start. */
 	UFUNCTION(BlueprintCallable, Category = "OLC|Research")
 	void RegisterStarterTechs();
+
+	// -----------------------------------------------------------------------
+	// Ring progression gating (WP-120 Step 6)
+	// -----------------------------------------------------------------------
+	/** Highest ring tier (as GetRingTierIndex()) with at least one completed tech. Starts at 0 (Core). */
+	UFUNCTION(BlueprintPure, Category = "OLC|Research")
+	int32 GetHighestCompletedRing() const { return HighestCompletedRing; }
+
+	/** True once the ring immediately below this one has produced a completed tech (Core is always unlocked). */
+	UFUNCTION(BlueprintPure, Category = "OLC|Research")
+	bool IsRingUnlocked(ERingTier Ring) const;
+
+	// -----------------------------------------------------------------------
+	// Faction/Champion research speed bonuses (WP-120 Step 7)
+	// -----------------------------------------------------------------------
+	/** Set once gameplay starts (see AOLCGameplayWorldActor::InitializeGameplayWorld) so Tick() can apply speed bonuses. */
+	UFUNCTION(BlueprintCallable, Category = "OLC|Research")
+	void SetActiveFactionAndChampion(UOLCFactionData* Faction, UOLCChampionData* Champion);
+
+	/** Combined multiplier applied to research DeltaTime: 1.0 = no bonus, 1.2 = +20%. */
+	UFUNCTION(BlueprintPure, Category = "OLC|Research")
+	float GetResearchSpeedMultiplier() const;
+
+	// -----------------------------------------------------------------------
+	// Research building placement requirements (WP-120 Step 8)
+	// -----------------------------------------------------------------------
+	/** True if a research building matching this tier's requirement is currently placed (see UOLCUIDataSubsystem::HasBuildingNamed). */
+	UFUNCTION(BlueprintPure, Category = "OLC|Research")
+	bool HasRequiredResearchBuilding(ERingTier Ring) const;
 
 	// -----------------------------------------------------------------------
 	// Events (for Blueprint binding)
@@ -124,6 +159,15 @@ private:
 
 	TArray<TObjectPtr<UOLCTechData>> AllTechs;
 	TArray<TObjectPtr<UOLCTechData>> CompletedTechs;
+
+	/** Highest ring index (see GetRingTierIndex) with at least one completed tech. */
+	int32 HighestCompletedRing = 0;
+
+	UPROPERTY()
+	TObjectPtr<UOLCFactionData> ActiveFaction;
+
+	UPROPERTY()
+	TObjectPtr<UOLCChampionData> ActiveChampion;
 
 	UPROPERTY()
 	TObjectPtr<UOLCTechData> CurrentResearch;

@@ -1,4 +1,5 @@
 #include "OLCToastWidget.h"
+#include "OurLastChance.h"
 
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -170,13 +171,17 @@ UOLCToastStackWidget::UOLCToastStackWidget(const FObjectInitializer& ObjectIniti
 void UOLCToastStackWidget::QueueToast(const FOLCToastData& ToastData)
 {
 	ToastQueue.Add(ToastData);
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Toast queued: %s — %s"), *ToastData.Title.ToString(), *ToastData.Message.ToString());
+	ProcessNextToast();
+	InvalidateLayoutAndVolatility();
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Toast queued: %s — %s"), *ToastData.Title.ToString(), *ToastData.Message.ToString());
 }
 
 void UOLCToastStackWidget::ClearAllToasts()
 {
 	ToastQueue.Reset();
 	ActiveToasts.Reset();
+	ActiveToastAges.Reset();
+	InvalidateLayoutAndVolatility();
 }
 
 TSharedRef<SWidget> UOLCToastStackWidget::RebuildWidget()
@@ -188,28 +193,36 @@ void UOLCToastStackWidget::NativeTick(const FGeometry& InGeometry, float InDelta
 {
 	Super::NativeTick(InGeometry, InDeltaTime);
 
-	TickTimer += InDeltaTime;
-
-	// Process queue every 0.5s
-	if (TickTimer >= 0.5f)
+	for (float& Age : ActiveToastAges)
 	{
-		TickTimer = 0.0f;
-		ProcessNextToast();
+		Age += InDeltaTime;
 	}
 
-	// Check for toasts that need removal (fade-out complete)
 	TArray<int32> ToRemove;
 	for (int32 i = 0; i < ActiveToasts.Num(); i++)
 	{
-		// Simple heuristic: if toast has been active longer than hold + fade, mark for removal
-		// In a full implementation, each toast would track its own state
+		const float Lifetime = FadeInDuration + ActiveToasts[i].DisplayDuration + FadeOutDuration;
+		if (ActiveToastAges.IsValidIndex(i) && ActiveToastAges[i] >= Lifetime)
+		{
+			ToRemove.Add(i);
+		}
 	}
 	if (!ToRemove.IsEmpty())
 	{
 		for (int32 i = ToRemove.Num() - 1; i >= 0; i--)
 		{
-			ActiveToasts.RemoveAt(ToRemove[i]);
+			const int32 RemoveIndex = ToRemove[i];
+			ActiveToasts.RemoveAt(RemoveIndex);
+			ActiveToastAges.RemoveAt(RemoveIndex);
 		}
+		InvalidateLayoutAndVolatility();
+	}
+
+	TickTimer += InDeltaTime;
+	if (TickTimer >= 0.1f)
+	{
+		TickTimer = 0.0f;
+		ProcessNextToast();
 	}
 }
 
@@ -218,7 +231,9 @@ void UOLCToastStackWidget::ProcessNextToast()
 	if (ActiveToasts.Num() < MaxVisibleToasts && !ToastQueue.IsEmpty())
 	{
 		ActiveToasts.Add(ToastQueue[0]);
+		ActiveToastAges.Add(0.0f);
 		ToastQueue.RemoveAt(0);
+		InvalidateLayoutAndVolatility();
 	}
 }
 

@@ -1,4 +1,5 @@
 #include "UI/OLCShipModuleManagementWidget.h"
+#include "OurLastChance.h"
 
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
@@ -378,7 +379,7 @@ TSharedRef<SWidget> UOLCShipModuleManagementWidget::BuildUpgradePanel()
 		.ButtonStyle(FCoreStyle::Get(), "NoBorder")
 		.IsEnabled(false) // Disabled until resource wiring implemented
 		.OnClicked_Lambda([]() -> FReply {
-			UE_LOG(LogTemp, Log, TEXT("[OLC] TIR upgrade clicked (placeholder)"));
+			UE_LOG(LogOLC, Log, TEXT("[OLC] TIR upgrade clicked (placeholder)"));
 			return FReply::Handled();
 		})
 		[

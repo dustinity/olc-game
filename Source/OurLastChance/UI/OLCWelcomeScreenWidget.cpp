@@ -1,4 +1,5 @@
 #include "OLCWelcomeScreenWidget.h"
+#include "OurLastChance.h"
 
 #include "Brushes/SlateDynamicImageBrush.h"
 #include "Framework/Application/SlateApplication.h"
@@ -27,10 +28,10 @@ namespace
 	FString UIFile(const TCHAR* FileName)
 	{
 		return FPaths::ConvertRelativePathToFull(
-			FPaths::ProjectDir() / TEXT("../../UE5/Assets/UI/WelcomeScreen") / FileName);
+			FPaths::ProjectDir() / TEXT("../../../Assets/UI/WelcomeScreen") / FileName);
 	}
 
-	bool AssetExists(const FString& Path) { return FPaths::FileExists(Path); }
+	bool WelcomeScreenAssetExists(const FString& Path) { return FPaths::FileExists(Path); }
 
 	FSlateColor MenuTextColor()
 	{
@@ -132,22 +133,23 @@ TSharedRef<SWidget> UOLCWelcomeScreenWidget::RebuildWidget()
 	BackgroundBrush = MakeUnique<FSlateDynamicImageBrush>(FName(*UIFile(TEXT("Background_3840x2160.png"))), FVector2D(DesignWidth, DesignHeight));
 	ButtonActiveBrush = MakeUnique<FSlateDynamicImageBrush>(FName(*UIFile(TEXT("Button_Active.png"))), FVector2D(470.0f, 64.0f));
 	ButtonInactiveBrush = MakeUnique<FSlateDynamicImageBrush>(FName(*UIFile(TEXT("Button_Inactive.png"))), FVector2D(470.0f, 64.0f));
+	SettingsPanelBrush = MakeUnique<FSlateDynamicImageBrush>(FName(*UIFile(TEXT("Panel_Settings.png"))), FVector2D(820.0f, 610.0f));
 
 	// Smoke VFX — try actual asset first, then fallback to procedural
 	FString SmokePath = UIFile(TEXT("VFX_Smoke_Soft.png"));
-	if (!AssetExists(SmokePath))
+	if (!WelcomeScreenAssetExists(SmokePath))
 	{
 		SmokePath = UIFile(TEXT("VFX_SmokePink_Soft.png"));
 	}
-	if (AssetExists(SmokePath))
+	if (WelcomeScreenAssetExists(SmokePath))
 	{
 		SmokeBrush = MakeUnique<FSlateDynamicImageBrush>(FName(*SmokePath), FVector2D(650.0f, 165.0f));
 		bSmokeAssetLoaded = true;
-		UE_LOG(LogTemp, Log, TEXT("[OLC] WelcomeScreen: Loaded smoke VFX from %s"), *SmokePath);
+		UE_LOG(LogOLC, Log, TEXT("[OLC] WelcomeScreen: Loaded smoke VFX from %s"), *SmokePath);
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] WelcomeScreen: Smoke VFX not found — using procedural SImage fallback"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] WelcomeScreen: Smoke VFX not found — using procedural SImage fallback"));
 		SmokeBrush = MakeUnique<FSlateDynamicImageBrush>(FName(*UIFile(TEXT("Background_3840x2160.png"))), FVector2D(650.0f, 165.0f));
 		bSmokeAssetLoaded = false;
 	}
@@ -175,34 +177,47 @@ TSharedRef<SWidget> UOLCWelcomeScreenWidget::RebuildWidget()
 			SNew(SImage)
 			.Image(BackgroundBrush.Get())
 		]
-		// Smoke overlay 1 (animated drift + opacity)
+		// Smoke overlay 1 (animated drift + opacity). Stretch-anchored with
+		// inset margins, not a point anchor -- see the note above Title text.
 		+ SConstraintCanvas::Slot()
-		.Anchors(FAnchors(0.0f, 0.0f))
+		.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f))
 		.Offset_Lambda([this]() -> FMargin {
 			FVector2D Offset = GetSmokeOffset(0, SmokeTimer);
-			return FMargin(150.0f + Offset.X, 690.0f + Offset.Y, 520.0f, 140.0f);
+			return FMargin(150.0f + Offset.X, 690.0f + Offset.Y, 1250.0f - Offset.X, 250.0f - Offset.Y);
 		})
 		[
 			SNew(SImage)
 			.Image_Lambda([this]() -> const FSlateBrush* { return SmokeBrush.Get(); })
 			.ColorAndOpacity_Lambda([this]() { return GetSmokeColor(0); })
+			.Visibility(EVisibility::HitTestInvisible)
 		]
 		// Smoke overlay 2 (animated drift + opacity, offset)
 		+ SConstraintCanvas::Slot()
-		.Anchors(FAnchors(0.0f, 0.0f))
+		.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f))
 		.Offset_Lambda([this]() -> FMargin {
 			FVector2D Offset = GetSmokeOffset(1, SmokeTimer);
-			return FMargin(640.0f + Offset.X, 700.0f + Offset.Y, 500.0f, 130.0f);
+			return FMargin(640.0f + Offset.X, 700.0f + Offset.Y, 780.0f - Offset.X, 250.0f - Offset.Y);
 		})
 		[
 			SNew(SImage)
 			.Image_Lambda([this]() -> const FSlateBrush* { return SmokeBrush.Get(); })
 			.ColorAndOpacity_Lambda([this]() { return GetSmokeColor(1); })
+			.Visibility(EVisibility::HitTestInvisible)
 		]
-		// Title text
+		// Title text. Stretch-anchored (Anchors spanning 0..1) with inset
+		// margins standing in for position+size, rather than a point anchor
+		// (Anchors(0,0) alone) -- SConstraintCanvas point-anchored slots
+		// were observed clipping their content in this project even though
+		// the canvas itself is correctly sized (confirmed via the
+		// full-stretch background rendering correctly): live geometry
+		// logging showed the canvas's own natural desired size, and
+		// GEngine's viewport-based scale, both computing correctly, so the
+		// clipping was isolated specifically to point-anchored children.
+		// Every other point-anchored slot in this widget (smoke, frame
+		// corners/edges, control panel) is converted the same way below.
 		+ SConstraintCanvas::Slot()
-		.Anchors(FAnchors(0.0f, 0.0f))
-		.Offset(FMargin(96.0f, 116.0f, 720.0f, 230.0f))
+		.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f))
+		.Offset(FMargin(96.0f, 116.0f, 1104.0f, 734.0f))
 		[
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight()
@@ -222,25 +237,55 @@ TSharedRef<SWidget> UOLCWelcomeScreenWidget::RebuildWidget()
 		]
 		// Menu buttons
 		+ SConstraintCanvas::Slot()
-		.Anchors(FAnchors(0.0f, 0.0f))
-		.Offset(FMargin(96.0f, 382.0f, 470.0f, 420.0f))
+		.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f))
+		.Offset(FMargin(96.0f, 382.0f, 1354.0f, 278.0f))
 		[
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 10.0f)
-			[ BuildMenuButton(LOCTEXT("Continue", "CONTINUE"), true, 0) ]
+			[ BuildMenuButton(LOCTEXT("Continue", "CONTINUE"), 0) ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 10.0f)
-			[ BuildMenuButton(LOCTEXT("NewCampaign", "NEW CAMPAIGN"), false, 1) ]
+			[ BuildMenuButton(LOCTEXT("NewCampaign", "NEW CAMPAIGN"), 1) ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 10.0f)
-			[ BuildMenuButton(LOCTEXT("LoadGame", "LOAD GAME"), false, 2) ]
+			[ BuildMenuButton(LOCTEXT("LoadGame", "LOAD GAME"), 2) ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 10.0f)
-			[ BuildMenuButton(LOCTEXT("Settings", "SETTINGS"), false, 3) ]
+			[ BuildMenuButton(LOCTEXT("Settings", "SETTINGS"), 3) ]
 			+ SVerticalBox::Slot().AutoHeight()
-			[ BuildMenuButton(LOCTEXT("Exit", "EXIT"), false, 4) ]
+			[ BuildMenuButton(LOCTEXT("Exit", "EXIT"), 4) ]
 		]
-		// Frame corners
+		// Frame edges. All four originally used a hybrid anchor (stretch in
+		// one axis, point in the other) -- the point-anchored axis had the
+		// same bug as the fully point-anchored slots below (title/buttons/
+		// smoke/corner TL), just affecting only that one axis instead of
+		// both, which is why these looked closer to correct but still not
+		// flush against their edge. Converted to full stretch + inset
+		// margins, computed to match the original intended position/size.
+		// Placed before the corners below so the corners paint on top,
+		// per request.
 		+ SConstraintCanvas::Slot()
-		.Anchors(FAnchors(0.0f, 0.0f))
-		.Offset(FMargin(150.0f, 690.0f, 520.0f, 140.0f))
+		.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f))
+		.Offset(FMargin(150.0f, 0.0f, -150.0f, 1016.0f))
+		[ SNew(SImage).Image(FrameEdgeTopBrush.Get()) ]
+		+ SConstraintCanvas::Slot()
+		.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f))
+		.Offset(FMargin(150.0f, 1016.0f, -150.0f, 0.0f))
+		[ SNew(SImage).Image(FrameEdgeBottomBrush.Get()) ]
+		+ SConstraintCanvas::Slot()
+		.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f))
+		.Offset(FMargin(0.0f, 150.0f, 1856.0f, -150.0f))
+		[ SNew(SImage).Image(FrameEdgeLeftBrush.Get()) ]
+		+ SConstraintCanvas::Slot()
+		.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f))
+		.Offset(FMargin(1856.0f, 150.0f, 0.0f, -150.0f))
+		[ SNew(SImage).Image(FrameEdgeRightBrush.Get()) ]
+		// Frame corners (painted after the edges above, so they sit on top
+		// where they overlap). TL was originally positioned at (150,690)
+		// size 520x140 -- nowhere near the top-left corner it's meant for
+		// (it overlapped the EXIT button instead), and invisible before
+		// the point-anchor fix hid the mistake. Repositioned to hug the
+		// actual top-left corner in a 160x160 box, matching TR/BR/BL below.
+		+ SConstraintCanvas::Slot()
+		.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f))
+		.Offset(FMargin(0.0f, 0.0f, 1760.0f, 920.0f))
 		[ SNew(SImage).Image(FrameCornerTLBrush.Get()) ]
 		+ SConstraintCanvas::Slot()
 		.Anchors(FAnchors(1.0f, 0.0f))
@@ -257,23 +302,6 @@ TSharedRef<SWidget> UOLCWelcomeScreenWidget::RebuildWidget()
 		.Alignment(FVector2D(0.0f, 1.0f))
 		.Offset(FMargin(0.0f, 0.0f, 160.0f, 160.0f))
 		[ SNew(SImage).Image(FrameCornerBLBrush.Get()) ]
-		// Frame edges
-		+ SConstraintCanvas::Slot()
-		.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 0.0f))
-		.Offset(FMargin(150.0f, 0.0f, -150.0f, 64.0f))
-		[ SNew(SImage).Image(FrameEdgeTopBrush.Get()) ]
-		+ SConstraintCanvas::Slot()
-		.Anchors(FAnchors(0.0f, 1.0f, 1.0f, 1.0f))
-		.Offset(FMargin(150.0f, -64.0f, -150.0f, 64.0f))
-		[ SNew(SImage).Image(FrameEdgeBottomBrush.Get()) ]
-		+ SConstraintCanvas::Slot()
-		.Anchors(FAnchors(0.0f, 0.0f, 0.0f, 1.0f))
-		.Offset(FMargin(0.0f, 150.0f, 64.0f, -150.0f))
-		[ SNew(SImage).Image(FrameEdgeLeftBrush.Get()) ]
-		+ SConstraintCanvas::Slot()
-		.Anchors(FAnchors(1.0f, 0.0f, 1.0f, 1.0f))
-		.Offset(FMargin(-64.0f, 150.0f, 64.0f, -150.0f))
-		[ SNew(SImage).Image(FrameEdgeRightBrush.Get()) ]
 		// Control panel
 		+ SConstraintCanvas::Slot()
 		.Anchors(FAnchors(1.0f, 1.0f))
@@ -285,7 +313,11 @@ TSharedRef<SWidget> UOLCWelcomeScreenWidget::RebuildWidget()
 		.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f))
 		.Offset(FMargin(0.0f))
 		[ BuildSettingsPanel() ]
-		// Orange flash overlay (top Z-order) — procedural per WP-13 spec
+		// Orange flash overlay (top Z-order) — procedural per WP-13 spec.
+		// HitTestInvisible: a full-screen SImage defaults to hit-testable
+		// regardless of its (near-zero) alpha, so without this every menu
+		// button underneath was swallowing no clicks -- they were all going
+		// to this invisible overlay instead.
 		+ SConstraintCanvas::Slot()
 		.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f))
 		.Offset(FMargin(0.0f))
@@ -293,16 +325,26 @@ TSharedRef<SWidget> UOLCWelcomeScreenWidget::RebuildWidget()
 			SNew(SImage)
 			.Image_Lambda([this]() -> const FSlateBrush* { return bFlashAssetLoaded ? FlashBrush.Get() : nullptr; })
 			.ColorAndOpacity(FLinearColor(0.95f, 0.42f, 0.03f, 0.0f))
+			.Visibility(EVisibility::HitTestInvisible)
 		];
 
-	return SNew(SScaleBox)
-		.Stretch(EStretch::ScaleToFit)
-		[
-			SNew(SBox)
-			.WidthOverride(DesignWidth)
-			.HeightOverride(DesignHeight)
-			[ Canvas ]
-		];
+	// SConstraintCanvas's own natural/desired size (when not overridden) is
+	// the bounding box of its non-stretch (point-anchored) children's
+	// offsets, not the 1920x1080 design this layout assumes -- confirmed
+	// by live geometry logging, where it picked up whatever the
+	// rightmost point-anchored child happened to be instead of the full
+	// design size. The SBox below fixes that by forcing a stable
+	// 1920x1080 local size so every child's design-space offset means
+	// what it says. No SScaleBox here: the ancestor viewport
+	// (AddFullscreenWidget's stretch-anchored slot) already applies the
+	// correct viewport-based scale on its own, confirmed by live geometry
+	// logging (Scale exactly matched ViewportWidth/1920 regardless of
+	// what this function returned) -- adding another scale on top
+	// double-applies it.
+	return SNew(SBox)
+		.WidthOverride(DesignWidth)
+		.HeightOverride(DesignHeight)
+		[ Canvas ];
 }
 
 void UOLCWelcomeScreenWidget::ReleaseSlateResources(bool bReleaseChildren)
@@ -311,6 +353,7 @@ void UOLCWelcomeScreenWidget::ReleaseSlateResources(bool bReleaseChildren)
 	BackgroundBrush.Reset();
 	ButtonActiveBrush.Reset();
 	ButtonInactiveBrush.Reset();
+	SettingsPanelBrush.Reset();
 	SmokeBrush.Reset();
 	FlashBrush.Reset();
 	FrameCornerTLBrush.Reset();
@@ -326,9 +369,9 @@ void UOLCWelcomeScreenWidget::ReleaseSlateResources(bool bReleaseChildren)
 	FlashOverlay.Reset();
 }
 
-TSharedRef<SWidget> UOLCWelcomeScreenWidget::BuildMenuButton(const FText& Label, bool bPrimary, int32 ActionId)
+TSharedRef<SWidget> UOLCWelcomeScreenWidget::BuildMenuButton(const FText& Label, int32 ActionId)
 {
-	return SNew(SButton)
+	TSharedRef<SButton> ButtonWidget = SNew(SButton)
 		.ButtonStyle(FCoreStyle::Get(), "NoBorder")
 		.ContentPadding(FMargin(0.0f))
 		.OnClicked_Lambda([this, ActionId]()
@@ -342,22 +385,43 @@ TSharedRef<SWidget> UOLCWelcomeScreenWidget::BuildMenuButton(const FText& Label,
 			case 4: return HandleExitClicked();
 			default: return FReply::Handled();
 			}
-		})
+		});
+
+	// Highlight follows actual mouse hover (bPrimary no longer forces a
+	// permanent highlight — it previously kept CONTINUE lit regardless of the
+	// cursor). Settings additionally stays highlighted while its panel is
+	// open, so the active screen reads as "selected" rather than looking
+	// unclicked once the mouse moves off the button.
+	const TWeakPtr<SButton> WeakButtonWidget = ButtonWidget;
+	const int32 SettingsActionId = 3;
+	auto IsHighlighted = [this, WeakButtonWidget, ActionId, SettingsActionId]() -> bool
+	{
+		const TSharedPtr<SButton> Pinned = WeakButtonWidget.Pin();
+		return (Pinned.IsValid() && Pinned->IsHovered()) || (ActionId == SettingsActionId && bSettingsVisible);
+	};
+
+	ButtonWidget->SetContent(
+		SNew(SOverlay)
+		+ SOverlay::Slot()
 		[
-			SNew(SOverlay)
-			+ SOverlay::Slot()
-			[
-				SNew(SImage)
-				.Image(bPrimary ? ButtonActiveBrush.Get() : ButtonInactiveBrush.Get())
-			]
-			+ SOverlay::Slot().Padding(38.0f, 10.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(Label)
-				.ColorAndOpacity(bPrimary ? FLinearColor::White : FLinearColor(0.78f, 0.82f, 0.88f, 1.0f))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 31))
-			]
-		];
+			SNew(SImage)
+			.Image_Lambda([this, IsHighlighted]() -> const FSlateBrush*
+			{
+				return IsHighlighted() ? ButtonActiveBrush.Get() : ButtonInactiveBrush.Get();
+			})
+		]
+		+ SOverlay::Slot().Padding(38.0f, 10.0f, 0.0f, 0.0f)
+		[
+			SNew(STextBlock)
+			.Text(Label)
+			.ColorAndOpacity_Lambda([this, IsHighlighted]() -> FSlateColor
+			{
+				return IsHighlighted() ? FLinearColor::White : FLinearColor(0.78f, 0.82f, 0.88f, 1.0f);
+			})
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 30))
+		]);
+
+	return ButtonWidget;
 }
 
 TSharedRef<SWidget> UOLCWelcomeScreenWidget::BuildSettingsPanel()
@@ -377,10 +441,14 @@ TSharedRef<SWidget> UOLCWelcomeScreenWidget::BuildSettingsPanel()
 				.WidthOverride(820.0f)
 				.HeightOverride(610.0f)
 				[
-					SNew(SBorder)
-					.BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
-					.BorderBackgroundColor(PanelBlack())
-					.Padding(FMargin(34.0f))
+					SNew(SOverlay)
+					+ SOverlay::Slot()
+					[
+						SNew(SImage)
+						.Image(SettingsPanelBrush.Get())
+					]
+					+ SOverlay::Slot()
+					.Padding(FMargin(48.0f, 46.0f, 48.0f, 42.0f))
 					[
 						SNew(SOverlay)
 						+ SOverlay::Slot()
@@ -651,13 +719,13 @@ void UOLCWelcomeScreenWidget::HandleShadowChanged(TSharedPtr<FString> NewSelecti
 
 FReply UOLCWelcomeScreenWidget::HandleContinueClicked()
 {
-	UE_LOG(LogTemp, Display, TEXT("Welcome menu: Continue clicked"));
+	UE_LOG(LogOLC, Display, TEXT("Welcome menu: Continue clicked"));
 	return FReply::Handled();
 }
 
 FReply UOLCWelcomeScreenWidget::HandleNewCampaignClicked()
 {
-	UE_LOG(LogTemp, Display, TEXT("[OLC] Welcome menu: New Campaign clicked — starting crash sequence"));
+	UE_LOG(LogOLC, Display, TEXT("[OLC] Welcome menu: New Campaign clicked — starting crash sequence"));
 
 	// Fire the delegate so the game mode can start the crash animation.
 	OnNewCampaign.Broadcast();
@@ -667,7 +735,7 @@ FReply UOLCWelcomeScreenWidget::HandleNewCampaignClicked()
 
 FReply UOLCWelcomeScreenWidget::HandleLoadGameClicked()
 {
-	UE_LOG(LogTemp, Display, TEXT("Welcome menu: Load Game clicked"));
+	UE_LOG(LogOLC, Display, TEXT("Welcome menu: Load Game clicked"));
 	return FReply::Handled();
 }
 
@@ -733,7 +801,7 @@ FReply UOLCWelcomeScreenWidget::HandleApplySettingsClicked()
 	UserSettings->ApplySettings(false);
 	UserSettings->SaveSettings();
 
-	UE_LOG(LogTemp, Display, TEXT("Welcome settings applied: Resolution=%s Quality=%d Shadow=%d"),
+	UE_LOG(LogOLC, Display, TEXT("Welcome settings applied: Resolution=%s Quality=%d Shadow=%d"),
 		SelectedResolution.IsValid() ? **SelectedResolution : TEXT("Unset"),
 		QualityIndex,
 		ShadowIndex);

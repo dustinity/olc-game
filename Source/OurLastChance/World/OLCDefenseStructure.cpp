@@ -1,4 +1,5 @@
 #include "OLCDefenseStructure.h"
+#include "OurLastChance.h"
 
 #include "Logging/LogMacros.h"
 
@@ -13,7 +14,7 @@ void AOLCDefenseStructure::BeginPlay()
 
 	CurrentHP = MaxHP;
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Defense structure '%s' online: HP=%.0f, range=%.0f, dmg=%.0f"),
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Defense structure '%s' online: HP=%.0f, range=%.0f, dmg=%.0f"),
 		*BuildingData.DisplayName.ToString(),
 		MaxHP,
 		AttackRange,
@@ -35,7 +36,7 @@ void AOLCDefenseStructure::Tick(float DeltaTime)
 
 		// In a full implementation, find nearest enemy within AttackRange and deal DamagePerTick.
 		// Placeholder: log attack fire.
-		UE_LOG(LogTemp, Verbose, TEXT("[OLC] Defense '%s' fired (range=%.0f, dmg=%.0f)"),
+		UE_LOG(LogOLC, Verbose, TEXT("[OLC] Defense '%s' fired (range=%.0f, dmg=%.0f)"),
 			*BuildingData.DisplayName.ToString(),
 			AttackRange,
 			DamagePerTick);

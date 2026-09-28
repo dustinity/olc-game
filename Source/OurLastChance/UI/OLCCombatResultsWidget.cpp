@@ -7,6 +7,10 @@
 #include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
 
+#include "Core/OLCEquipmentSubsystem.h"
+#include "Core/OLCUIDataSubsystem.h"
+#include "Engine/GameInstance.h"
+
 #define LOCTEXT_NAMESPACE "OLCCombatResultsWidget"
 
 UOLCCombatResultsWidget::UOLCCombatResultsWidget(const FObjectInitializer& ObjectInitializer)
@@ -16,7 +20,10 @@ UOLCCombatResultsWidget::UOLCCombatResultsWidget(const FObjectInitializer& Objec
 
 TSharedRef<SWidget> UOLCCombatResultsWidget::RebuildWidget()
 {
-	InitializeResults(true); // Prototype: assume victory
+	if (!bHasRealResult)
+	{
+		InitializeResults(true); // Prototype fallback: assume victory
+	}
 
 	return SNew(SBorder)
 		.BorderBackgroundColor(FLinearColor(0.005f, 0.012f, 0.016f, 0.98f))
@@ -68,6 +75,7 @@ TSharedRef<SWidget> UOLCCombatResultsWidget::BuildTopBar()
 				SNew(SButton)
 				.ButtonStyle(FCoreStyle::Get(), "NoBorder")
 				.OnClicked_Lambda([this]() -> FReply {
+					FeedCompletionResults();
 					OnReturnToBase.Broadcast();
 					this->RemoveFromParent();
 					return FReply::Handled();
@@ -98,13 +106,28 @@ TSharedRef<SWidget> UOLCCombatResultsWidget::BuildLootPanel()
 		.ColorAndOpacity(OLCStyleColors::TextDim)
 		.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10)) ];
 
-	for (int32 i = 0; i < LootRewards.Num(); i++)
+	int32 NumRowsShown = 0;
+	if (bHasRealResult)
 	{
-		VBox->AddSlot().AutoHeight()
-		[ BuildLootRow(LootRewards[i], LootQuantities[i]) ];
+		for (const FOLCDungeonLootRoll& Roll : RealResult.LootRolls)
+		{
+			if (!Roll.bDropped) continue;
+			VBox->AddSlot().AutoHeight()
+			[ BuildLootRollRow(Roll) ];
+			NumRowsShown++;
+		}
+	}
+	else
+	{
+		for (int32 i = 0; i < LootRewards.Num(); i++)
+		{
+			VBox->AddSlot().AutoHeight()
+			[ BuildLootRow(LootRewards[i], LootQuantities[i]) ];
+			NumRowsShown++;
+		}
 	}
 
-	if (LootRewards.Num() == 0)
+	if (NumRowsShown == 0)
 	{
 		VBox->AddSlot().AutoHeight()
 		[ SNew(STextBlock).Text(LOCTEXT("NoLoot", "NO LOOT FOUND"))
@@ -149,6 +172,51 @@ TSharedRef<SWidget> UOLCCombatResultsWidget::BuildLootRow(const FOLCDungeonRewar
 				FText::FromString(TEXT("+{0} {1}")),
 				FText::AsNumber(Quantity),
 				ResourceTypeText))
+				.ColorAndOpacity(OLCStyleColors::TextWhite)
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12)) ]
+		];
+}
+
+FLinearColor UOLCCombatResultsWidget::GetRarityColor(EOLCDungeonRarityTier Tier)
+{
+	switch (Tier)
+	{
+		case EOLCDungeonRarityTier::Common:    return FLinearColor(0.6f, 0.6f, 0.6f, 1.0f);
+		case EOLCDungeonRarityTier::Uncommon:  return FLinearColor(0.2f, 0.8f, 0.2f, 1.0f);
+		case EOLCDungeonRarityTier::Rare:      return FLinearColor(0.2f, 0.4f, 0.8f, 1.0f);
+		case EOLCDungeonRarityTier::Epic:      return FLinearColor(0.5f, 0.2f, 0.8f, 1.0f);
+		case EOLCDungeonRarityTier::Legendary: return FLinearColor(1.0f, 0.84f, 0.0f, 1.0f);
+		default:                               return FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
+	}
+}
+
+TSharedRef<SWidget> UOLCCombatResultsWidget::BuildLootRollRow(const FOLCDungeonLootRoll& Roll)
+{
+	const bool bNamedUnique = Roll.bIsUnique && !Roll.UniqueItemName.IsEmpty();
+	const FLinearColor RowColor = bNamedUnique ? OLCStyleColors::WarningYellow : GetRarityColor(Roll.Rarity);
+	const FText DisplayName = bNamedUnique ? Roll.UniqueItemName : Roll.Reward.RewardName;
+
+	FText QuantityText;
+	if (Roll.EquipmentTemplate.IsValid())
+	{
+		QuantityText = LOCTEXT("LootRoll_Equipment", "EQUIPPABLE");
+	}
+	else
+	{
+		QuantityText = FText::Format(FText::FromString(TEXT("+{0}")), FText::AsNumber(Roll.Quantity));
+	}
+
+	return SNew(SBorder)
+		.BorderBackgroundColor(RowColor)
+		.Padding(FMargin(10.0f, 6.0f))
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth()
+			[ SNew(STextBlock).Text(DisplayName)
+				.ColorAndOpacity(RowColor)
+				.Font(FCoreStyle::GetDefaultFontStyle(bNamedUnique ? "Bold" : "Regular", 12)) ]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).HAlign(HAlign_Right)
+			[ SNew(STextBlock).Text(QuantityText)
 				.ColorAndOpacity(OLCStyleColors::TextWhite)
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12)) ]
 		];
@@ -310,6 +378,124 @@ void UOLCCombatResultsWidget::InitializeResults(bool bVictoryIn)
 		};
 		ArtifactName = Artifacts[FMath::RandRange(0, Artifacts.Num() - 1)];
 	}
+}
+
+void UOLCCombatResultsWidget::InitializeFromResult(const FDungeonCompletionResult& Result)
+{
+	bHasRealResult = true;
+	RealResult = Result;
+	bVictory = Result.bVictory;
+
+	UnitNames.Reset();
+	UnitXPReceived.Reset();
+	UnitIsCasualty.Reset();
+
+	for (const auto& Pair : Result.UnitXPGains)
+	{
+		UnitNames.Add(FText::FromString(Pair.Key));
+		UnitXPReceived.Add(Pair.Value);
+		UnitIsCasualty.Add(false);
+	}
+	for (const FText& Casualty : Result.Casualties)
+	{
+		UnitNames.Add(Casualty);
+		UnitXPReceived.Add(0.0f);
+		UnitIsCasualty.Add(true);
+	}
+}
+
+void UOLCCombatResultsWidget::FeedCompletionResults()
+{
+	FDungeonCompletionResult Result;
+
+	if (bHasRealResult)
+	{
+		Result = RealResult;
+	}
+	else
+	{
+		// Prototype fallback (pre-WP-130 AOLCCombatTriggerActor flow): build a result from the sample data.
+		Result.bVictory = bVictory;
+		if (bVictory)
+		{
+			for (const auto& Reward : LootRewards)
+			{
+				const float Amount = FMath::RandRange(Reward.MinQuantity, Reward.MaxQuantity) * Reward.DropChance;
+				float& Existing = Result.ResourcesGained.FindOrAdd(Reward.ResourceType);
+				Existing += Amount;
+
+				if (Reward.bIsBlueprint)
+				{
+					Result.BlueprintGrants.Add(Reward.BlueprintName);
+				}
+			}
+
+			for (int32 i = 0; i < UnitNames.Num(); i++)
+			{
+				if (!UnitIsCasualty[i])
+				{
+					const float XPBase = UnitXPReceived.IsValidIndex(i) ? UnitXPReceived[i] : 0.0f;
+					Result.UnitXPGains.Add(UnitNames[i].ToString(), XPBase * 0.8f); // 80% of prototype XP survives
+				}
+				else
+				{
+					Result.Casualties.Add(UnitNames[i]);
+				}
+			}
+
+			if (Result.ResourcesGained.Contains(EOLCResourceType::DarkMatterCrystals))
+			{
+				TArray<FText> PrototypeResearch = {
+					LOCTEXT("Research_TacticalAI", "Tactical AI Operation"),
+					LOCTEXT("Research_CrystalTech", "Crystalloid Technology"),
+					LOCTEXT("Research_AdvancedCombat", "Advanced Combat Tactics"),
+				};
+				Result.ResearchUnlocks.Add(PrototypeResearch[FMath::RandRange(0, PrototypeResearch.Num() - 1)]);
+			}
+			for (const auto& BPName : Result.BlueprintGrants)
+			{
+				Result.ResearchUnlocks.Add(FText::Format(LOCTEXT("Research_Blueprint", "Blueprint Analysis: {0}"), BPName));
+			}
+		}
+	}
+
+	if (Result.bVictory)
+	{
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			// Resources -> canonical resource counters.
+			if (UOLCUIDataSubsystem* UIData = GI->GetSubsystem<UOLCUIDataSubsystem>())
+			{
+				for (const auto& Pair : Result.ResourcesGained)
+				{
+					UIData->AddResource(Pair.Key, Pair.Value);
+				}
+			}
+
+			// Equipment -> canonical equipment pool / unique loot.
+			if (UOLCEquipmentSubsystem* Equip = GI->GetSubsystem<UOLCEquipmentSubsystem>())
+			{
+				for (const FOLCDungeonLootRoll& Roll : Result.LootRolls)
+				{
+					if (!Roll.bDropped || !Roll.EquipmentTemplate.IsValid()) continue;
+
+					if (Roll.bIsUnique)
+					{
+						Equip->AddUniqueLoot(Roll.EquipmentTemplate.Get(), Roll.UniqueItemName);
+					}
+					else
+					{
+						Equip->AddToPool(Roll.EquipmentTemplate.Get(), 1);
+					}
+				}
+			}
+
+			// Blueprints -> research unlock log. Tech-node creation is WP-120's research domain;
+			// OnDungeonCompletion (broadcast below) remains the hook for that consumer.
+		}
+	}
+
+	OnDungeonCompletion.Broadcast(Result);
 }
 
 #undef LOCTEXT_NAMESPACE

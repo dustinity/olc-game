@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "World/OLCBuildingBase.h"
+#include "Core/OLCUnitData.h"
 #include "OLCProductionFacility.generated.h"
 
 /** Pending production entry in the queue. */
@@ -20,6 +21,9 @@ struct FOLCProductionQueueEntry
 	/** Total time required in seconds. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|Production")
 	float Duration = 60.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|Production")
+	TObjectPtr<UOLCUnitData> UnitDataAsset;
 
 	FOLCProductionQueueEntry() {}
 };
@@ -42,6 +46,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "OLC|Production")
 	void QueueProduct(const FText& ProductName, float Duration);
 
+	UFUNCTION(BlueprintCallable, Category = "OLC|Production")
+	bool QueueUnitProduction(UOLCUnitData* UnitDataAsset, bool bHasAirfield);
+
 	/** Get current number of queued products. */
 	UFUNCTION(BlueprintPure, Category = "OLC|Production")
 	int32 GetQueueSize() const { return ProductionQueue.Num(); }
@@ -50,10 +57,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "OLC|Production")
 	bool IsQueueEmpty() const { return ProductionQueue.IsEmpty(); }
 
+	/** Get the unit currently in production and its progress (0-1), if the active entry is a unit (not a resource product). */
+	UFUNCTION(BlueprintPure, Category = "OLC|Production")
+	bool GetActiveUnitProduction(UOLCUnitData*& OutUnitData, float& OutProgress) const;
+
 protected:
 	virtual void BeginPlay() override;
 
 private:
+	void CompleteActiveProduction();
+
 	/** Queue of pending productions. */
 	UPROPERTY(BlueprintReadWrite, Category = "OLC|Production", meta = (AllowPrivateAccess = "true"))
 	TArray<FOLCProductionQueueEntry> ProductionQueue;

@@ -1,4 +1,5 @@
 #include "OLCHUDWidgets.h"
+#include "OurLastChance.h"
 
 #include "Brushes/SlateDynamicImageBrush.h"
 #include "Misc/Paths.h"
@@ -16,10 +17,13 @@
 #include "Widgets/Text/STextBlock.h"
 
 #include "Player/OLCMenuPlayerController.h"
+#include "Player/OLCGameplayPlayerController.h"
 #include "UI/OLCSharedWidgets.h" // OLCStyleColors
 #include "Core/OLCUIDataSubsystem.h"
 #include "Core/OLCResearchSubsystem.h"
+#include "Core/OLCTutorialSubsystem.h"
 #include "World/OLCPlanetTerrainActor.h"
+#include "World/OLCBuildingBase.h"
 #include "Kismet/GameplayStatics.h"
 #include "UI/OLCToastWidget.h"
 #include "EngineUtils.h"
@@ -48,18 +52,18 @@ namespace HUDLayout
 		}
 	}
 
-	/** Main HUD asset path — relative to project dir via ../../UE5/Assets/UI/Main HUD Elements/Assets/Sliced */
+	/** Main HUD asset path — relative to project dir via ../../../Assets/UI/Main HUD Elements/Assets/Sliced */
 	FString MainHUDAssetPath(const FString& FileName)
 	{
 		return FPaths::ConvertRelativePathToFull(
-			FPaths::ProjectDir() / TEXT("../../UE5/Assets/UI/Main HUD Elements/Assets/Sliced") / FileName);
+			FPaths::ProjectDir() / TEXT("../../../Assets/UI/Main HUD Elements/Assets/Sliced") / FileName);
 	}
 
-	/** Shared asset path — relative to project dir via ../../UE5/Assets/UI/Shared Assets/Sliced */
+	/** Shared asset path — relative to project dir via ../../../Assets/UI/Shared Assets/Sliced */
 	FString SharedAssetPath(const FString& FileName)
 	{
 		return FPaths::ConvertRelativePathToFull(
-			FPaths::ProjectDir() / TEXT("../../UE5/Assets/UI/Shared Assets/Sliced") / FileName);
+			FPaths::ProjectDir() / TEXT("../../../Assets/UI/Shared Assets/Sliced") / FileName);
 	}
 
 	bool AssetExists(const FString& Path) { return FPaths::FileExists(Path); }
@@ -98,6 +102,12 @@ TSharedRef<SWidget> UOLCMainRTSHUDWidget::RebuildWidget()
 		.WidthOverride(330.0f)
 		[ BuildMissionProgress() ]
 	]
+	// ---- TOP-CENTER: Tutorial hint (WP-129 Step 4) ----
+	+ SOverlay::Slot()
+	.VAlign(VAlign_Top)
+	.HAlign(HAlign_Center)
+	.Padding(0.0f, 92.0f, 0.0f, 0.0f)
+	[ BuildTutorialHint() ]
 	// ---- UPPER-LEFT (below mission): Research Progress ----
 	+ SOverlay::Slot()
 	.VAlign(VAlign_Top)
@@ -474,6 +484,102 @@ TSharedRef<SWidget> UOLCMainRTSHUDWidget::BuildMissionProgress()
 			.Padding(FMargin(0.0f, 8.0f, 0.0f, 0.0f))
 			[ Panel ]
 		];
+}
+
+// ---------------------------------------------------------------------------
+// Tutorial hint (top-center, WP-129 Step 4) — short contextual instruction for
+// the active crash-site tutorial objective. Refreshed on OnTutorialAdvanced;
+// collapses once the tutorial is complete or skipped.
+// ---------------------------------------------------------------------------
+FText UOLCMainRTSHUDWidget::GetTutorialHintText() const
+{
+	const UGameInstance* GI = GetGameInstance();
+	const UOLCTutorialSubsystem* Tutorial = GI ? GI->GetSubsystem<UOLCTutorialSubsystem>() : nullptr;
+	if (!Tutorial)
+	{
+		return FText::GetEmpty();
+	}
+
+	switch (Tutorial->GetActiveObjective())
+	{
+		case EOLCTutorialObjective::InspectCrashSite:
+			return LOCTEXT("HintInspect", "Approach the wreck and press E to inspect the crash site.");
+		case EOLCTutorialObjective::CollectMaterials:
+			return LOCTEXT("HintCollect", "Mine Construction Material — check the resource strip for your total.");
+		case EOLCTutorialObjective::DiscoverDeposit:
+			return LOCTEXT("HintDiscover", "Scout the surrounding terrain to discover a mineral deposit.");
+		case EOLCTutorialObjective::PlaceSolarArray:
+			return LOCTEXT("HintPlace", "Open Construction Mode (F2) and place a Solar Array.");
+		case EOLCTutorialObjective::BeginDriveRepair:
+			return LOCTEXT("HintRepair", "Return to the dropship and begin the drive repair.");
+		default:
+			return FText::GetEmpty();
+	}
+}
+
+TSharedRef<SWidget> UOLCMainRTSHUDWidget::BuildTutorialHint()
+{
+	const FText HintText = GetTutorialHintText();
+
+	TutorialHintTextBlock = SNew(STextBlock)
+		.Text(HintText)
+		.ColorAndOpacity(OLCStyleColors::TextWhite)
+		.Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
+		.Justification(ETextJustify::Center);
+
+	TSharedRef<SWidget> Container =
+		SNew(SBorder)
+		.BorderBackgroundColor(FLinearColor(0.02f, 0.035f, 0.04f, 0.94f))
+		.Padding(FMargin(16.0f, 8.0f))
+		.Visibility(HintText.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+		[
+			TutorialHintTextBlock.ToSharedRef()
+		];
+
+	TutorialHintContainer = Container;
+	return Container;
+}
+
+void UOLCMainRTSHUDWidget::HandleTutorialAdvanced(EOLCTutorialObjective NewActiveObjective)
+{
+	RefreshTutorialHint();
+}
+
+void UOLCMainRTSHUDWidget::RefreshTutorialHint()
+{
+	const FText HintText = GetTutorialHintText();
+	if (TutorialHintTextBlock.IsValid())
+	{
+		TutorialHintTextBlock->SetText(HintText);
+	}
+	if (TutorialHintContainer.IsValid())
+	{
+		TutorialHintContainer->SetVisibility(HintText.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible);
+	}
+}
+
+void UOLCMainRTSHUDWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UOLCTutorialSubsystem* Tutorial = GI->GetSubsystem<UOLCTutorialSubsystem>())
+		{
+			Tutorial->OnTutorialAdvanced.AddDynamic(this, &UOLCMainRTSHUDWidget::HandleTutorialAdvanced);
+		}
+	}
+}
+
+void UOLCMainRTSHUDWidget::NativeDestruct()
+{
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UOLCTutorialSubsystem* Tutorial = GI->GetSubsystem<UOLCTutorialSubsystem>())
+		{
+			Tutorial->OnTutorialAdvanced.RemoveDynamic(this, &UOLCMainRTSHUDWidget::HandleTutorialAdvanced);
+		}
+	}
+	Super::NativeDestruct();
 }
 
 // ---------------------------------------------------------------------------
@@ -930,6 +1036,18 @@ TSharedRef<SWidget> UOLCMainRTSHUDWidget::BuildMinimap()
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
 			[
+				SNew(SButton)
+				.ButtonStyle(FCoreStyle::Get(), "NoBorder")
+				.ContentPadding(FMargin(0.0f))
+				.OnClicked_Lambda([this]() -> FReply
+				{
+					if (AOLCGameplayPlayerController* PC = Cast<AOLCGameplayPlayerController>(GetOwningPlayer()))
+					{
+						PC->OnMinimapClick(FVector2D(0.5f, 0.5f));
+					}
+					return FReply::Handled();
+				})
+				[
 				SNew(SBorder)
 				.BorderBackgroundColor(FLinearColor(0.08f, 0.10f, 0.12f, 1.0f))
 				.Padding(FMargin(0.0f))
@@ -938,6 +1056,7 @@ TSharedRef<SWidget> UOLCMainRTSHUDWidget::BuildMinimap()
 					.WidthOverride(MapWidth)
 					.HeightOverride(MapHeight)
 					[ MinimapContent ]
+				]
 				]
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
@@ -1354,6 +1473,7 @@ TSharedRef<SWidget> UOLCMainRTSHUDWidget::BuildBiomeHazardsStrip()
 			.Padding(0.0f, 0.0f, 4.0f, 0.0f)
 			[
 				SNew(SBorder)
+				.ToolTipText(LocalBadge.TooltipText)
 				.BorderBackgroundColor(OLCStyleColors::DarkSteel)
 				.Padding(FMargin(8.0f, 3.0f))
 				[
@@ -1664,11 +1784,21 @@ TSharedRef<SWidget> UOLCConstructionOverlayWidget::BuildCardFor(const FOLCBuildC
 			FText::AsNumber(FMath::RoundToInt(LocalCard.BuildCost[0].CurrentValue)));
 	}
 
+	// WP-120 Step 5: locked cards (research not yet unlocked, or ring
+	// requirement not met — see UOLCUIDataSubsystem::RefreshBuildCardAvailability)
+	// stay visible but grayed out and non-interactive, rather than hidden —
+	// raw SImage/SBorder don't auto-dim from IsEnabled() alone, so opacity is
+	// applied explicitly.
+	const float CardOpacity = LocalCard.bAvailable ? 1.0f : 0.35f;
+
 	return SNew(SButton)
 		.ButtonStyle(FCoreStyle::Get(), "NoBorder")
 		.ContentPadding(FMargin(0.0f))
+		.IsEnabled(LocalCard.bAvailable)
+		.ToolTipText(LocalCard.bAvailable ? FText::GetEmpty() : LOCTEXT("BuildCardLocked", "Requires further research to unlock."))
 		.OnClicked_Lambda([this, LocalCard]()
 		{
+			if (!LocalCard.bAvailable) return FReply::Handled();
 			const EOLCConstructionCategory CurrentCat = ConstructionCategories.IsValidIndex(SelectedCategoryIndex)
 				? ConstructionCategories[SelectedCategoryIndex]
 				: EOLCConstructionCategory::Power;
@@ -1697,7 +1827,7 @@ TSharedRef<SWidget> UOLCConstructionOverlayWidget::BuildCardFor(const FOLCBuildC
 				[
 					SNew(SImage)
 					.Image(FrameBrush)
-					.ColorAndOpacity(FLinearColor::White)
+					.ColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, CardOpacity))
 				]
 				+ SOverlay::Slot()
 				.VAlign(VAlign_Top)
@@ -2122,7 +2252,7 @@ void UOLCConstructionOverlayWidget::OnCardSelected(int32 CardIndex)
 FReply UOLCConstructionOverlayWidget::OnRotateClicked()
 {
 	BuildRotationDegrees = (BuildRotationDegrees + 90) % 360;
-	UE_LOG(LogTemp, Display, TEXT("[OLC] Construction: Rotation = %d deg"), BuildRotationDegrees);
+	UE_LOG(LogOLC, Display, TEXT("[OLC] Construction: Rotation = %d deg"), BuildRotationDegrees);
 	RefreshConstructionScreen();
 	return FReply::Handled();
 }
@@ -2147,7 +2277,7 @@ FReply UOLCConstructionOverlayWidget::OnConfirmClicked()
 	UpdatePlacementValidity();
 	if (!bIsPlacementValid)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Cannot build — invalid placement"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Cannot build — invalid placement"));
 		return FReply::Handled();
 	}
 
@@ -2182,7 +2312,7 @@ FReply UOLCConstructionOverlayWidget::OnConfirmClicked()
 
 			if (!Data->ConsumeResourcesForBuild(Cost))
 			{
-				UE_LOG(LogTemp, Warning, TEXT("[OLC] Cannot afford build: %s"), *SelectedCard->BuildingName.ToString());
+				UE_LOG(LogOLC, Warning, TEXT("[OLC] Cannot afford build: %s"), *SelectedCard->BuildingName.ToString());
 				return FReply::Handled();
 			}
 		}
@@ -2198,13 +2328,27 @@ FReply UOLCConstructionOverlayWidget::OnConfirmClicked()
 			FVector WorldPos;
 			if (Terrain->PlaceBuilding(PlacementGridOrigin, SelectedCard->GridSize, WorldPos, BuildRotationDegrees))
 			{
-				UE_LOG(LogTemp, Log, TEXT("[OLC] Building placed at %s"), *WorldPos.ToString());
+				FActorSpawnParameters SpawnParams;
+				SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+				FString BlueprintName = SelectedCard->BuildingName.ToString().Replace(TEXT(" "), TEXT(""));
+				TSubclassOf<AOLCBuildingBase> BuildingClass = LoadClass<AOLCBuildingBase>(nullptr, *FString::Printf(TEXT("/Game/OurLastChance/Buildings/BP_%s.BP_%s_C"), *BlueprintName, *BlueprintName));
+				if (!BuildingClass) BuildingClass = AOLCBuildingBase::StaticClass();
+				AOLCBuildingBase* Building = GetWorld()->SpawnActor<AOLCBuildingBase>(BuildingClass, WorldPos, FRotator(0.0f, BuildRotationDegrees, 0.0f), SpawnParams);
+				if (Building)
+				{
+					FOLCBuildingConfig Config; Config.DisplayName=SelectedCard->BuildingName; Config.Category=SelectedCard->Category; Config.GridSize=SelectedCard->GridSize;
+					Config.BuildCost=SelectedCard->BuildCost; Config.PowerConsumption=SelectedCard->PowerConsumption; Config.OutputPerTick=SelectedCard->ExpectedOutputPerTick; Config.TIRRequirement=SelectedCard->TIRRequirement; Config.Description=SelectedCard->Description;
+					Building->SetBuildingData(Config);
+					Building->SetPowered(true);
+					if (UGameInstance* GI=GetWorld()->GetGameInstance()) if (UOLCUIDataSubsystem* Data=GI->GetSubsystem<UOLCUIDataSubsystem>()) Data->OnBuildingPlaced(Building, SelectedCard->SourceData);
+				}
+				UE_LOG(LogOLC, Log, TEXT("[OLC] Building placed at %s"), *WorldPos.ToString());
 			}
 			break;
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Confirmed build: %s at grid %s"),
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Confirmed build: %s at grid %s"),
 		*SelectedCard->BuildingName.ToString(),
 		*PlacementGridOrigin.ToString());
 
@@ -2311,48 +2455,26 @@ void UOLCConstructionOverlayWidget::RefreshConstructionScreen()
 // ---------------------------------------------------------------------------
 TSharedRef<SWidget> UOLCMainRTSHUDWidget::BuildToastStack()
 {
-	// WP-107 Step 7: Create toast stack widget instance
-	UOLCToastStackWidget* ToastStack = nullptr;
-	if (UGameInstance* GI = GetWorld()->GetGameInstance())
+	if (!ToastStackWidget)
 	{
-		ToastStack = CreateWidget<UOLCToastStackWidget>(GI, UOLCToastStackWidget::StaticClass());
+		ToastStackWidget = CreateWidget<UOLCToastStackWidget>(GetOwningPlayer(), UOLCToastStackWidget::StaticClass());
 	}
 
-	TSharedRef<SScrollBox> ToastList = SNew(SScrollBox);
-
-	if (ToastStack)
-	{
-		// Queue some demo toasts for testing
-		ToastStack->QueueToast(FOLCToastData(
-			LOCTEXT("ToastWelcome", "WELCOME COMMANDER"),
-			LOCTEXT("ToastWelcomeMsg", "Base operations initialized. All systems nominal."),
-			EOLCColorRole::Success));
-	}
-
-	return SNew(SOverlay)
-		+ SOverlay::Slot()
-		.VAlign(VAlign_Top)
-		.HAlign(HAlign_Right)
-		.Padding(0.0f, 210.0f, 18.0f, 0.0f)
-		[
-			SNew(SBox)
-			.WidthOverride(320.0f)
-			.HeightOverride(200.0f)
-			[ ToastList ]
-		];
+	return ToastStackWidget
+		? ToastStackWidget->TakeWidget()
+		: SNew(SBox).WidthOverride(320.0f).HeightOverride(200.0f);
 }
 
 void UOLCMainRTSHUDWidget::QueueToastNotification(const FText& InTitle, const FText& InMessage, EOLCColorRole InColor)
 {
-	// WP-107 Step 7: Queue a toast from gameplay events
-	if (UGameInstance* GI = GetWorld()->GetGameInstance())
+	if (!ToastStackWidget)
 	{
-		if (UOLCToastStackWidget* NewToastStack = CreateWidget<UOLCToastStackWidget>(GI, UOLCToastStackWidget::StaticClass()))
-		{
-			NewToastStack->QueueToast(FOLCToastData(InTitle, InMessage, InColor));
-			NewToastStack->AddToViewport(100);
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Toast stack created and queued: %s"), *InTitle.ToString());
-		}
+		ToastStackWidget = CreateWidget<UOLCToastStackWidget>(GetOwningPlayer(), UOLCToastStackWidget::StaticClass());
+	}
+	if (ToastStackWidget)
+	{
+		ToastStackWidget->QueueToast(FOLCToastData(InTitle, InMessage, InColor));
+		UE_LOG(LogOLC, Log, TEXT("[OLC] HUD toast queued: %s"), *InTitle.ToString());
 	}
 }
 

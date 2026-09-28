@@ -65,12 +65,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "OLC|Infrastructure|Training")
 	void StartTraining(UOLCUnitData* UnitDataAsset);
 
+	UFUNCTION(BlueprintCallable, Category = "OLC|Infrastructure|Training")
+	bool CanTrainUnit(UOLCUnitData* UnitDataAsset, FText& OutReason) const;
+
 	/** Get the current active training entry (null if none). */
 	const FOLCTrainingQueueEntry* GetActiveTraining() const { return ActiveTraining; }
 
 	/** Get the number of units in the training queue. */
 	UFUNCTION(BlueprintPure, Category = "OLC|Infrastructure|Training")
 	int32 GetQueueSize() const { return TrainingQueue.Num(); }
+
+	UFUNCTION(BlueprintPure, Category = "OLC|Infrastructure|Training")
+	bool HasCapacityForTraining() const;
 
 protected:
 	virtual void Tick(float DeltaTime) override;
@@ -96,6 +102,9 @@ private:
 
 	UPROPERTY(BlueprintReadWrite, Category = "OLC|Infrastructure|Training", meta = (AllowPrivateAccess = "true"))
 	bool bIsTraining = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|Infrastructure|Training", meta = (AllowPrivateAccess = "true"))
+	int32 MaxTrainingQueueSize = 4;
 
 private:
 	/** Additional unit housing slots provided. */

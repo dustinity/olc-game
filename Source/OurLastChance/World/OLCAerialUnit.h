@@ -5,6 +5,14 @@
 #include "Core/OLCUnitData.h"
 #include "OLCAerialUnit.generated.h"
 
+UENUM(BlueprintType)
+enum class EOLCAltitudeBand : uint8
+{
+	Low UMETA(DisplayName = "Low"),
+	Medium UMETA(DisplayName = "Medium"),
+	High UMETA(DisplayName = "High")
+};
+
 /**
  * Aerial unit — ignores terrain collision, has altitude and flight physics.
  * Base class for all flying units (drones, fighters, dropships).
@@ -25,6 +33,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "OLC|Aerial")
 	void SetTargetAltitude(float NewAltitude);
 
+	UFUNCTION(BlueprintCallable, Category = "OLC|Aerial")
+	void SetAltitudeBand(EOLCAltitudeBand Band);
+
+	UFUNCTION(BlueprintPure, Category = "OLC|Aerial")
+	float GetSpeedMultiplier() const;
+
+	UFUNCTION(BlueprintPure, Category = "OLC|Aerial")
+	float GetDetectionProfile() const;
+
+	UFUNCTION(BlueprintCallable, Category = "OLC|Aerial")
+	AOLCUnitBase* DeployUnit(TSubclassOf<AOLCUnitBase> UnitClass);
+
 protected:
 	virtual void Tick(float DeltaTime) override;
 	virtual void BeginPlay() override;
@@ -40,4 +60,7 @@ private:
 	/** Altitude change speed. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|Aerial", meta = (AllowPrivateAccess = "true"))
 	float AltitudeSpeed = 100.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "OLC|Aerial", meta = (AllowPrivateAccess = "true"))
+	EOLCAltitudeBand AltitudeBand = EOLCAltitudeBand::Medium;
 };

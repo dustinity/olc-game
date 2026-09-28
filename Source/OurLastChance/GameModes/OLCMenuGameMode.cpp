@@ -1,29 +1,38 @@
 #include "OLCMenuGameMode.h"
+#include "OurLastChance.h"
 
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Core/OLCResourceTypes.h"
 #include "Core/OLCResearchSubsystem.h"
+#include "Core/OLCRaceSubsystem.h"
+#include "Core/OLCTutorialSubsystem.h"
+#include "Core/OLCTutorialTypes.h"
 #include "Core/OLCUIDataSubsystem.h"
+#include "UObject/SoftObjectPath.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Modules/ModuleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Logging/LogMacros.h"
 #include "Player/OLCGameplayPlayerController.h"
 #include "Player/OLCMenuPlayerController.h"
+#include "UI/OLCCrashSequenceWidget.h"
+#include "World/OLCCrashSitePrototypeActor.h"
 #include "World/OLCGameplayWorldActor.h"
 #include "Core/OLCFactionData.h"
 #include "EngineUtils.h"
 
+// WP-129 Step 2: tutorial target registration happens in TransitionToGameplay.
+
 AOLCMenuGameMode::AOLCMenuGameMode()
 {
-	// Phase durations for crash animation sequence (seconds):
-	// 0: Side-view flight approach     — 4s
-	// 1: Atmospheric entry / descent   — 3s
-	// 2: Crash impact + dust cloud     — 2s
-	// 3: Post-crash scene              — 3s
-	// 4: Door opens, transition ready  — 2s
-	CrashPhaseDurations = { 4.0f, 3.0f, 2.0f, 3.0f, 2.0f };
+	// WP-112 temporary plate sequence:
+	// 0: Night approach / wing shear
+	// 1: Camera-side rock strike
+	// 2: Predawn hard ground crash
+	// 3: Daybreak crossfade
+	// 4: Gameplay handoff
+	CrashPhaseDurations = { 4.0f, 3.0f, 2.0f, 2.0f, 1.0f };
 
 	PrimaryActorTick.bCanEverTick = true;
 
@@ -39,7 +48,7 @@ void AOLCMenuGameMode::BeginPlay()
 	CurrentGameState = EOLCGameState::Menu;
 	CurrentCrashPhase = 0;
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] MenuGameMode initialized — waiting for New Game"));
+	UE_LOG(LogOLC, Log, TEXT("[OLC] MenuGameMode initialized — waiting for New Game"));
 }
 
 void AOLCMenuGameMode::StartCrashSequence()
@@ -48,10 +57,20 @@ void AOLCMenuGameMode::StartCrashSequence()
 	CurrentCrashPhase = 0;
 	bWelcomeShown = true;
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Crash sequence started — phase 0: side-view flight"));
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Crash sequence started — phase 0: side-view flight"));
 
 	// Set up the side-view camera for the crash animation.
 	SetupSequenceCamera();
+
+	if (APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr)
+	{
+		CrashSequenceWidget = CreateWidget<UOLCCrashSequenceWidget>(PC, UOLCCrashSequenceWidget::StaticClass());
+		if (CrashSequenceWidget)
+		{
+			CrashSequenceWidget->SetCrashPhase(CurrentCrashPhase);
+			CrashSequenceWidget->AddToViewport(500);
+		}
+	}
 
 	// Start the first phase timer.
 	StartPhaseTimer();
@@ -68,8 +87,79 @@ void AOLCMenuGameMode::TransitionToGameplay()
 		GetWorld()->GetTimerManager().ClearTimer(CrashPhaseTimer);
 	}
 
+	if (CrashSequenceWidget)
+	{
+		CrashSequenceWidget->RemoveFromParent();
+		CrashSequenceWidget = nullptr;
+	}
+
 	// Spawn gameplay world inside the same map before switching to RTS view.
 	SpawnGameplayWorld();
+
+	// WP-129 Step 2 (repair): ensure the interactive crash-site tutorial actor
+	// exists in the real gameplay flow. It was only placed by OLCUITestGameMode,
+	// so without this the inspect/deposit hooks were dormant where players
+	// actually play. Spawned in tutorial-only mode: invisible interact sphere +
+	// recorded mineral-node positions only — no visual terrain rendered on top
+	// of the existing planet map. Anchored at the crashed dropship location.
+	AOLCCrashSitePrototypeActor* CrashSiteActor = nullptr;
+	for (TActorIterator<AOLCCrashSitePrototypeActor> It(GetWorld()); It; ++It)
+	{
+		CrashSiteActor = *It;
+		break;
+	}
+	if (!CrashSiteActor)
+	{
+		FVector SpawnLocation = FVector::ZeroVector;
+		for (TActorIterator<AOLCGameplayWorldActor> It(GetWorld()); It; ++It)
+		{
+			SpawnLocation = It->GetCrashedShipLocation();
+			break;
+		}
+
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		CrashSiteActor = GetWorld()->SpawnActor<AOLCCrashSitePrototypeActor>(AOLCCrashSitePrototypeActor::StaticClass(), SpawnLocation, FRotator::ZeroRotator, SpawnParams);
+		if (CrashSiteActor)
+		{
+			CrashSiteActor->SetTutorialOnly(true);
+			UE_LOG(LogOLC, Display, TEXT("[OLC] Tutorial-only crash-site actor spawned at %s"), *SpawnLocation.ToString());
+		}
+	}
+
+	// WP-129 Step 2: register tutorial world targets for interactive onboarding.
+	// Inspect target: dedicated crash-site actor when present, otherwise the
+	// gameplay world actor (crashed dropship). Drive-repair target: the
+	// gameplay world actor hosting the crashed ship.
+	if (UGameInstance* GI = GetWorld()->GetGameInstance())
+	{
+		UOLCTutorialSubsystem* Tutorial = GI->GetSubsystem<UOLCTutorialSubsystem>();
+
+		if (Tutorial)
+		{
+			AActor* InspectTarget = CrashSiteActor;
+			if (!InspectTarget)
+			{
+				for (TActorIterator<AOLCGameplayWorldActor> It(GetWorld()); It; ++It)
+				{
+					InspectTarget = *It;
+					break;
+				}
+			}
+			Tutorial->RegisterTargetActor(EOLCTutorialObjective::InspectCrashSite, InspectTarget);
+
+			AActor* DriveRepairTarget = nullptr;
+			for (TActorIterator<AOLCGameplayWorldActor> It(GetWorld()); It; ++It)
+			{
+				DriveRepairTarget = *It;
+				break;
+			}
+			Tutorial->RegisterTargetActor(EOLCTutorialObjective::BeginDriveRepair, DriveRepairTarget);
+
+			UE_LOG(LogOLC, Display, TEXT("[OLC] Tutorial targets registered (inspect=%s)"),
+				InspectTarget ? *InspectTarget->GetName() : TEXT("none"));
+		}
+	}
 
 	// Destroy the sequence camera.
 	if (SequenceCamera)
@@ -136,15 +226,51 @@ void AOLCMenuGameMode::TransitionToGameplay()
 
 			Data->SetMissionObjectives(TutorialObjectives);
 
-			// Also add dropship starting resources per Briefing Dropship README:
-			// Construction Material ~80, Minerals 50, Fuel 30, Survival 40, Hull Parts 25
-			Data->AddResource(EOLCResourceType::ConstructionMaterial, 80.0f);
-			Data->AddResource(EOLCResourceType::Minerals, 50.0f);
-			Data->AddResource(EOLCResourceType::Fuel, 30.0f);
-			Data->AddResource(EOLCResourceType::Survival, 40.0f);
-			Data->AddResource(EOLCResourceType::HullParts, 25.0f);
+			// WP-129 Step 5: load the designer-tunable tutorial config DataAsset and
+			// register it with the tutorial subsystem (initial state — objective 1
+			// Active on a fresh save, or wherever LoadProgress resumed to — plus the
+			// first highlight placement are handled inside InitializeFromConfig).
+			UOLCTutorialSubsystem* Tutorial = GI->GetSubsystem<UOLCTutorialSubsystem>();
+			if (Tutorial)
+			{
+				UOLCTutorialData* TutorialConfig = Cast<UOLCTutorialData>(
+					FSoftObjectPath(TEXT("/Game/OurLastChance/Data/Tutorial/DA_TutorialConfig.DA_TutorialConfig")).TryLoad());
+				Tutorial->InitializeFromConfig(TutorialConfig);
 
-			UE_LOG(LogTemp, Display, TEXT("[OLC] Tutorial objectives initialized — %d steps"), TutorialObjectives.Num());
+				UE_LOG(LogOLC, Display, TEXT("[OLC] Tutorial config %s"),
+					TutorialConfig ? TEXT("loaded from DA_TutorialConfig") : TEXT("DA_TutorialConfig not found — using built-in defaults"));
+			}
+
+			// Dropship starting resources — canonical snapshot lives on DA_TutorialConfig
+			// (StartingInventory), falling back to the built-in defaults it mirrors:
+			// Construction Material 80, Minerals 50, Fuel 30, Survival 40, Hull Parts 25.
+			// WP-129 Step 2 (repair): when the interactive crash-site actor is
+			// present and objective 1 is not yet complete, this grant happens on
+			// inspect completion instead (InteractWithCrashSite) — granting it
+			// here too would duplicate the reward. On a resumed session where
+			// inspect already completed, re-grant here because resources are
+			// per-session while tutorial progress persists across reloads.
+			const bool bInspectAlreadyComplete = Tutorial && Tutorial->IsObjectiveComplete(EOLCTutorialObjective::InspectCrashSite);
+			if (!CrashSiteActor || bInspectAlreadyComplete)
+			{
+				const UOLCTutorialData* TutorialConfig = Tutorial ? Tutorial->GetTutorialData() : nullptr;
+				const TArray<FOLCResourceAmount> StartingInventory = (TutorialConfig && TutorialConfig->StartingInventory.Num() > 0)
+					? TutorialConfig->StartingInventory
+					: UOLCTutorialData::GetDefaultStartingInventory();
+
+				for (const FOLCResourceAmount& Amount : StartingInventory)
+				{
+					Data->AddResource(Amount.ResourceType, Amount.CurrentValue);
+				}
+
+				UE_LOG(LogOLC, Display, TEXT("[OLC] Dropship starting inventory granted at transition (%d resource types)"), StartingInventory.Num());
+			}
+			else
+			{
+				UE_LOG(LogOLC, Display, TEXT("[OLC] Starting inventory deferred to crash-site inspect completion (objective 1)"));
+			}
+
+			UE_LOG(LogOLC, Display, TEXT("[OLC] Tutorial objectives initialized — %d steps"), TutorialObjectives.Num());
 		}
 
 		// Register starter techs and auto-complete Core ring.
@@ -153,11 +279,19 @@ void AOLCMenuGameMode::TransitionToGameplay()
 			Research->RegisterStarterTechs();
 			Research->AutoCompleteCoreTechs();
 
-			UE_LOG(LogTemp, Display, TEXT("[OLC] Tech tree initialized — starter techs registered and Core auto-unlocked"));
+			UE_LOG(LogOLC, Display, TEXT("[OLC] Tech tree initialized — starter techs registered and Core auto-unlocked"));
+		}
+
+		// Register the 33-race roster (WP-118).
+		if (UOLCRaceSubsystem* Races = GI->GetSubsystem<UOLCRaceSubsystem>())
+		{
+			Races->RegisterStarterRaces();
+
+			UE_LOG(LogOLC, Display, TEXT("[OLC] Race system initialized — %d races registered"), Races->GetAllRaces().Num());
 		}
 	}
 
-	UE_LOG(LogTemp, Display, TEXT("[OLC] Transitioned to gameplay — top-down RTS view active"));
+	UE_LOG(LogOLC, Display, TEXT("[OLC] Transitioned to gameplay — top-down RTS view active"));
 }
 
 /** WP-109: Switch player controller from Menu PC to Gameplay PC for proper input handling. */
@@ -175,7 +309,7 @@ void AOLCMenuGameMode::TransitionPlayerControllerToGameplay()
 	CurrentPC->SetIgnoreLookInput(false);
 	CurrentPC->bShowMouseCursor = true;
 
-	UE_LOG(LogTemp, Display, TEXT("[OLC] Player controller transitioned to gameplay input mode"));
+	UE_LOG(LogOLC, Display, TEXT("[OLC] Player controller transitioned to gameplay input mode"));
 }
 
 void AOLCMenuGameMode::SpawnGameplayWorld()
@@ -201,17 +335,17 @@ void AOLCMenuGameMode::SpawnGameplayWorld()
 	}
 	if (!GameplayWorldActor)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Failed to spawn gameplay world actor"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Failed to spawn gameplay world actor"));
 		return;
 	}
 
 	UOLCFactionData* SelectedFactionData = LoadFactionDataById(SelectedFactionId);
 	if (!SelectedFactionData && !SelectedFactionId.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Could not load faction data asset for '%s'"), *SelectedFactionId);
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Could not load faction data asset for '%s'"), *SelectedFactionId);
 	}
 
-	GameplayWorldActor->InitializeGameplayWorld(GameplayBiome, GameplaySeed, SelectedFactionData);
+	GameplayWorldActor->InitializeGameplayWorld(GameplayBiome, GameplaySeed, SelectedFactionData, SelectedChampionId);
 }
 
 UOLCFactionData* AOLCMenuGameMode::LoadFactionDataById(const FString& FactionId) const
@@ -285,12 +419,12 @@ void AOLCMenuGameMode::SetupSequenceCamera()
 		if (PC)
 		{
 			PC->SetViewTarget(SequenceCamera);
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Sequence camera placed at side-view position"));
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Sequence camera placed at side-view position"));
 		}
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Failed to spawn sequence camera"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Failed to spawn sequence camera"));
 	}
 }
 
@@ -332,12 +466,12 @@ void AOLCMenuGameMode::SetupRTSCamera()
 				MenuPC->SetActiveCamera(RTSCamera);
 			}
 
-			UE_LOG(LogTemp, Log, TEXT("[OLC] RTS camera placed at top-down position"));
+			UE_LOG(LogOLC, Log, TEXT("[OLC] RTS camera placed at top-down position"));
 		}
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Failed to spawn RTS camera"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Failed to spawn RTS camera"));
 	}
 }
 
@@ -350,7 +484,7 @@ void AOLCMenuGameMode::AdvanceCrashPhase()
 		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Crash phase %d/%d complete"),
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Crash phase %d/%d complete"),
 		CurrentCrashPhase + 1, CrashPhaseDurations.Num());
 
 	CurrentCrashPhase++;
@@ -368,7 +502,12 @@ void AOLCMenuGameMode::AdvanceCrashPhase()
 
 		if (CurrentCrashPhase < UE_ARRAY_COUNT(PhaseNames))
 		{
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Phase %d: %s"), CurrentCrashPhase, *PhaseNames[CurrentCrashPhase]);
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Phase %d: %s"), CurrentCrashPhase, *PhaseNames[CurrentCrashPhase]);
+		}
+
+		if (CrashSequenceWidget)
+		{
+			CrashSequenceWidget->SetCrashPhase(CurrentCrashPhase);
 		}
 
 		StartPhaseTimer();

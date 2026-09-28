@@ -20,7 +20,11 @@ public:
     AOLCGameplayWorldActor();
 
     UFUNCTION(BlueprintCallable, Category = "OLC|Gameplay")
-    void InitializeGameplayWorld(EOLCBiomeType Biome, int32 Seed, UOLCFactionData* Faction);
+    void InitializeGameplayWorld(EOLCBiomeType Biome, int32 Seed, UOLCFactionData* Faction, const FString& ChampionId = FString());
+
+    /** World location of the crashed dropship (WP-129 Step 2 tutorial spawn anchor). */
+    UFUNCTION(BlueprintPure, Category = "OLC|Gameplay")
+    FVector GetCrashedShipLocation() const;
 
 protected:
     virtual void BeginPlay() override;
@@ -28,6 +32,7 @@ protected:
 private:
     void SpawnTerrainActor();
     void PlaceCrashedShip();
+    void SpawnSelectedChampionMarker();
 
     UPROPERTY(EditAnywhere, Category = "OLC|Gameplay")
     TSubclassOf<AOLCPlanetTerrainActor> TerrainActorClass;
@@ -47,7 +52,11 @@ private:
     UPROPERTY()
     TObjectPtr<UOLCFactionData> CurrentFaction;
 
+    UPROPERTY()
+    TObjectPtr<AActor> ChampionMarkerActor;
+
     FOLCTerrainGenerationSettings TerrainSettings;
+    FString SelectedChampionId;
     EOLCBiomeType RequestedBiome = EOLCBiomeType::Desert;
     bool bIsInitialized = false;
 };

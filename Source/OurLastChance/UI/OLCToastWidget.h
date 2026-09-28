@@ -131,6 +131,9 @@ private:
 	/** Currently displayed toasts (up to MaxVisibleToasts). */
 	TArray<FOLCToastData> ActiveToasts;
 
+	/** Elapsed display time for each active toast. */
+	TArray<float> ActiveToastAges;
+
 	/** Timer for tick updates. */
 	float TickTimer = 0.0f;
 

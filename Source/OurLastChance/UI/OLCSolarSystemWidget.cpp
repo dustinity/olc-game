@@ -1,4 +1,5 @@
 #include "OLCSolarSystemWidget.h"
+#include "OurLastChance.h"
 
 #include "Brushes/SlateDynamicImageBrush.h"
 #include "Misc/Paths.h"
@@ -11,6 +12,8 @@
 #include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Core/OLCUIDataSubsystem.h"
+#include "Core/OLCNavigationSubsystem.h"
+#include "Core/OLCScanTierData.h"
 #include "Player/OLCMenuPlayerController.h"
 
 #include "UI/OLCSharedWidgets.h" // OLCStyleColors
@@ -25,13 +28,13 @@ namespace SolarAssetPath
 	FString PlanetMarker(const FString& FileName)
 	{
 		return FPaths::ConvertRelativePathToFull(
-			FPaths::ProjectDir() / TEXT("../../UE5/Assets/UI/Solar System UI/Assets") / FileName);
+			FPaths::ProjectDir() / TEXT("../../../Assets/UI/Galaxy System UI/Assets") / FileName);
 	}
 
 	FString NavMarker(const FString& FileName)
 	{
 		return FPaths::ConvertRelativePathToFull(
-			FPaths::ProjectDir() / TEXT("../../UE5/Assets/UI/Solar System UI/Assets") / FileName);
+			FPaths::ProjectDir() / TEXT("../../../Assets/UI/Galaxy System UI/Assets") / FileName);
 	}
 
 	bool AssetExists(const FString& Path) { return FPaths::FileExists(Path); }
@@ -45,7 +48,16 @@ UOLCSolarSystemWidget::UOLCSolarSystemWidget(const FObjectInitializer& ObjectIni
 TSharedRef<SWidget> UOLCSolarSystemWidget::RebuildWidget()
 {
 	if (UGameInstance* GI = GetWorld()->GetGameInstance())
+	{
 		ResourceSubsystem = GI->GetSubsystem<UOLCUIDataSubsystem>();
+		NavigationSubsystem = GI->GetSubsystem<UOLCNavigationSubsystem>();
+	}
+
+	if (NavigationSubsystem)
+	{
+		NavigationSubsystem->OnScanCompleted.RemoveDynamic(this, &UOLCSolarSystemWidget::HandleScanCompleted);
+		NavigationSubsystem->OnScanCompleted.AddDynamic(this, &UOLCSolarSystemWidget::HandleScanCompleted);
+	}
 
 	InitializeSolarSystemData();
 
@@ -79,43 +91,8 @@ void UOLCSolarSystemWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 	CanvasSize = MyGeometry.GetLocalSize();
 	SunPosition = CanvasSize / 2.0f;
 
-	if (bIsScanning && ResourceSubsystem)
-	{
-		ScanProgress += InDeltaTime;
-		if (ScanProgress >= ScanDuration)
-		{
-			bIsScanning = false;
-			ScanProgress = 0.0f;
-			if (SelectedPlanetIndex >= 0 && SelectedPlanetIndex < Planets.Num())
-			{
-				Planets[SelectedPlanetIndex].bScanned = true;
-				const FText Biomes[] = {
-					FText::FromString(TEXT("Desert")), FText::FromString(TEXT("Dusty")),
-					FText::FromString(TEXT("Rocky")), FText::FromString(TEXT("Water")),
-					FText::FromString(TEXT("Swamp")), FText::FromString(TEXT("Jungle")),
-					FText::FromString(TEXT("LightSnow")), FText::FromString(TEXT("Ice"))
-				};
-				const int32 BiomeIdx = (SelectedPlanetIndex * 3 + 7) % UE_ARRAY_COUNT(Biomes);
-				Planets[SelectedPlanetIndex].BiomeType = Biomes[BiomeIdx];
-
-				FString ResStr;
-				if (SelectedPlanetIndex % 2 == 0)
-					ResStr = TEXT("Minerals, Construction Material");
-				else if (SelectedPlanetIndex % 3 == 0)
-					ResStr = TEXT("Fuel, Energy Cells");
-				else
-					ResStr = TEXT("Minerals, Hull Parts, Survival");
-				Planets[SelectedPlanetIndex].Resources = FText::FromString(ResStr);
-
-				UE_LOG(LogTemp, Display, TEXT("[OLC] Planet scanned: %s — Biome: %s, Resources: %s"),
-					*Planets[SelectedPlanetIndex].PlanetName.ToString(),
-					*Planets[SelectedPlanetIndex].BiomeType.ToString(),
-					*Planets[SelectedPlanetIndex].Resources.ToString());
-
-				InvalidateLayoutAndVolatility();
-			}
-		}
-	}
+	if (NavigationSubsystem)
+		NavigationSubsystem->TickScans(InDeltaTime);
 }
 
 TSharedRef<SWidget> UOLCSolarSystemWidget::BuildOrbitalCanvas()
@@ -129,7 +106,7 @@ TSharedRef<SWidget> UOLCSolarSystemWidget::BuildOrbitalCanvas()
 		float RingRadius = Planet.OrbitRadius * FMath::Min(CanvasSize.X / 1920.0f, CanvasSize.Y / 1080.0f) * 0.35f;
 
 		Canvas->AddSlot()
-			.Offset(FMargin((FVector2d::ZeroVector).X, (FVector2d::ZeroVector).Y, 0.0f, 0.0f)).AutoSize(true)
+			.Offset(FMargin((FVector2D::ZeroVector).X, (FVector2D::ZeroVector).Y, 0.0f, 0.0f)).AutoSize(true)
 			[
 				SNew(SBorder)
 				.BorderBackgroundColor(FLinearColor(0.08f, 0.1f, 0.12f, 0.35f))
@@ -139,7 +116,7 @@ TSharedRef<SWidget> UOLCSolarSystemWidget::BuildOrbitalCanvas()
 
 	// Draw sun at center.
 	Canvas->AddSlot()
-		.Offset(FMargin((SunPosition - FVector2d(40.0f, 40.0f)).X, (SunPosition - FVector2d(40.0f, 40.0f)).Y, 0.0f, 0.0f)).AutoSize(true)
+		.Offset(FMargin((SunPosition - FVector2D(40.0f, 40.0f)).X, (SunPosition - FVector2D(40.0f, 40.0f)).Y, 0.0f, 0.0f)).AutoSize(true)
 		[
 			SNew(SBox)
 			.WidthOverride(80.0f)
@@ -158,12 +135,12 @@ TSharedRef<SWidget> UOLCSolarSystemWidget::BuildOrbitalCanvas()
 		auto& Planet = Planets[i];
 		float RingRadius = Planet.OrbitRadius * FMath::Min(CanvasSize.X / 1920.0f, CanvasSize.Y / 1080.0f) * 0.35f;
 		float RadAngle = Planet.OrbitAngle * PI / 180.0f;
-		FVector2d PlanetPos(SunPosition.X + FMath::Cos(RadAngle) * RingRadius,
+		FVector2D PlanetPos(SunPosition.X + FMath::Cos(RadAngle) * RingRadius,
 		                     SunPosition.Y + FMath::Sin(RadAngle) * RingRadius);
 
 		Planet.Position = PlanetPos;
 		Canvas->AddSlot()
-			.Offset(FMargin((PlanetPos - FVector2d(Planet.Radius, Planet.Radius)).X, (PlanetPos - FVector2d(Planet.Radius, Planet.Radius)).Y, 0.0f, 0.0f)).AutoSize(true)
+			.Offset(FMargin((PlanetPos - FVector2D(Planet.Radius, Planet.Radius)).X, (PlanetPos - FVector2D(Planet.Radius, Planet.Radius)).Y, 0.0f, 0.0f)).AutoSize(true)
 			[ BuildPlanetNode(Planet) ];
 	}
 
@@ -171,7 +148,7 @@ TSharedRef<SWidget> UOLCSolarSystemWidget::BuildOrbitalCanvas()
 	for (const auto& Station : Stations)
 	{
 		Canvas->AddSlot()
-			.Offset(FMargin((Station.Position - FVector2d(10.0f, 10.0f)).X, (Station.Position - FVector2d(10.0f, 10.0f)).Y, 0.0f, 0.0f)).AutoSize(true)
+			.Offset(FMargin((Station.Position - FVector2D(10.0f, 10.0f)).X, (Station.Position - FVector2D(10.0f, 10.0f)).Y, 0.0f, 0.0f)).AutoSize(true)
 			[ BuildStationMarker(Station) ];
 	}
 
@@ -400,11 +377,7 @@ TSharedRef<SWidget> UOLCSolarSystemWidget::BuildDetailPanel()
 	else                              StateColor = OLCStyleColors::TextDim;
 
 	bool bCanNavigate = !Planet.bIsCurrentPlanet && ResourceSubsystem;
-	bool bCanScan = !Planet.bScanned && !Planet.bIsCurrentPlanet && ResourceSubsystem;
-
-	FText ScanBtnLabel = LOCTEXT("Btn_Scan", "SCAN");
-	if (bIsScanning)  ScanBtnLabel = LOCTEXT("Btn_Scanning", "SCANNING...");
-	else if (!bCanScan) ScanBtnLabel = LOCTEXT("Btn_NoEnergy", "NO ENERGY");
+	bool bCanScan = !Planet.bIsCurrentPlanet && NavigationSubsystem && !bIsScanning;
 
 	FText NavBtnLabel = LOCTEXT("Btn_Navigate", "NAVIGATE");
 	if (Planet.bIsCurrentPlanet) NavBtnLabel = LOCTEXT("Btn_Current", "CURRENT");
@@ -412,6 +385,63 @@ TSharedRef<SWidget> UOLCSolarSystemWidget::BuildDetailPanel()
 
 	FText ResourcesText = Planet.Resources.IsEmpty() ? FText::FromString(TEXT("?")) : Planet.Resources;
 	FText BiomeText = Planet.BiomeType.IsEmpty() ? FText::FromString(TEXT("?")) : Planet.BiomeType;
+
+	FText FeaturesText = FText::FromString(TEXT("?"));
+	if (Planet.bScanned)
+	{
+		if (Planet.DiscoveredFeatures.Num() > 0)
+		{
+			TArray<FString> FeatureStrings;
+			for (const FText& Feature : Planet.DiscoveredFeatures)
+				FeatureStrings.Add(Feature.ToString());
+			FeaturesText = FText::FromString(FString::Join(FeatureStrings, TEXT(", ")));
+		}
+		else
+		{
+			FeaturesText = LOCTEXT("Features_None", "None found");
+		}
+	}
+
+	TArray<TSharedRef<SWidget>> TierButtons;
+	if (NavigationSubsystem)
+	{
+		if (UOLCScanTierData* TierData = NavigationSubsystem->GetScanTierData())
+		{
+			for (const FOLCScanTierConfig& TierConfig : TierData->ScanTiers)
+			{
+				const EOLCScanTier ThisTier = TierConfig.ScanTier;
+				const FText BtnLabel = FText::Format(
+					FText::FromString(TEXT("{0} ({1} EN)")),
+					TierConfig.DisplayName, FText::AsNumber(TierConfig.EnergyCost));
+
+				TierButtons.Add(
+					SNew(SButton)
+					.ButtonStyle(FCoreStyle::Get(), "NoBorder")
+					.OnClicked_Lambda([this, ThisTier]() -> FReply { ScanSelectedPlanet(ThisTier); return FReply::Handled(); })
+					.IsEnabled(bCanScan)
+					[ SNew(SBorder)
+						.BorderBackgroundColor(bCanScan ? OLCStyleColors::TacticalBlue : OLCStyleColors::GunmetalBlack)
+						.Padding(FMargin(10.0f, 6.0f))
+						[ SNew(STextBlock).Text(BtnLabel)
+							.ColorAndOpacity(bCanScan ? OLCStyleColors::TextWhite : OLCStyleColors::TextDim)
+							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10)) ] ]
+				);
+			}
+		}
+	}
+	if (TierButtons.Num() == 0)
+	{
+		TierButtons.Add(
+			SNew(STextBlock).Text(bIsScanning ? LOCTEXT("Btn_Scanning", "SCANNING...") : LOCTEXT("Btn_NoTierData", "NO SCAN TIER DATA"))
+				.ColorAndOpacity(OLCStyleColors::TextDim).Font(FCoreStyle::GetDefaultFontStyle("Regular", 10)));
+	}
+
+	TSharedRef<SHorizontalBox> TierButtonBox = SNew(SHorizontalBox);
+	for (const TSharedRef<SWidget>& Btn : TierButtons)
+	{
+		TierButtonBox->AddSlot().AutoWidth().Padding(0.0f, 0.0f, 6.0f, 6.0f)
+			[ Btn ];
+	}
 
 	return SNew(SBorder)
 		.BorderBackgroundColor(FLinearColor(0.006f, 0.012f, 0.016f, 0.98f))
@@ -463,32 +493,21 @@ TSharedRef<SWidget> UOLCSolarSystemWidget::BuildDetailPanel()
 					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 4.0f)
 					[ SNew(STextBlock).Text(FText::Format(FText::FromString(TEXT("SCAN COST: {0} ENERGY")), FText::AsNumber(Planet.ScanCost)))
 						.ColorAndOpacity(OLCStyleColors::TextDim).Font(FCoreStyle::GetDefaultFontStyle("Regular", 10)) ]
-					// Scan progress bar if scanning
+					// Discovered features
 					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 4.0f)
-					[ SNew(STextBlock).Text(FText::Format(FText::FromString(TEXT("SCAN: {0}%")),
-						FText::AsNumber(FMath::RoundToInt(ScanProgress / ScanDuration * 100.0f))))
-						.ColorAndOpacity(OLCStyleColors::TacticalBlue).Font(FCoreStyle::GetDefaultFontStyle("Bold", 10)) ]
+					[ SNew(STextBlock).Text(FText::FromString(TEXT("FEATURES:")))
+						.ColorAndOpacity(OLCStyleColors::TextDim).Font(FCoreStyle::GetDefaultFontStyle("Bold", 9)) ]
 					+ SVerticalBox::Slot().AutoHeight()
-					[
-						SNew(SBorder).BorderBackgroundColor(OLCStyleColors::GunmetalBlack).Padding(FMargin(1.0f))
-						[ SNew(SBox).HeightOverride(4.0f)
-							[ SNew(SBorder).BorderBackgroundColor(OLCStyleColors::TacticalBlue).Padding(FMargin(0.0f))
-								[ SNew(SBox).WidthOverride(200.0f * ScanProgress / FMath::Max(ScanDuration, 1.0f)).HeightOverride(4.0f) ] ] ]
-					]
-					// Scan button
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 6.0f)
-					[
-						SNew(SButton)
-						.ButtonStyle(FCoreStyle::Get(), "NoBorder")
-						.OnClicked_Lambda([this]() -> FReply { ScanSelectedPlanet(); return FReply::Handled(); })
-						.IsEnabled(bCanScan && !bIsScanning)
-						[ SNew(SBorder)
-							.BorderBackgroundColor((bCanScan && !bIsScanning) ? OLCStyleColors::TacticalBlue : OLCStyleColors::GunmetalBlack)
-							.Padding(FMargin(16.0f, 8.0f))
-							[ SNew(STextBlock).Text(ScanBtnLabel)
-								.ColorAndOpacity((bCanScan && !bIsScanning) ? OLCStyleColors::TextWhite : OLCStyleColors::TextDim)
-								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12)) ] ]
-					]
+					[ SNew(STextBlock).Text(FeaturesText).AutoWrapText(true)
+						.ColorAndOpacity(Planet.bScanned ? OLCStyleColors::TextWhite : OLCStyleColors::TextDim)
+						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10)) ]
+					// Scan status
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 4.0f)
+					[ SNew(STextBlock).Text(bIsScanning ? LOCTEXT("Btn_Scanning", "SCANNING...") : LOCTEXT("Scan_TierPrompt", "SCAN AT TIER:"))
+						.ColorAndOpacity(OLCStyleColors::TacticalBlue).Font(FCoreStyle::GetDefaultFontStyle("Bold", 10)) ]
+					// Scan-tier buttons (sourced from DA_ScanTiers)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 6.0f)
+					[ TierButtonBox ]
 					// Navigate button
 					+ SVerticalBox::Slot().AutoHeight()
 					[
@@ -513,72 +532,65 @@ void UOLCSolarSystemWidget::InitializeSolarSystemData()
 	Planets.Reset();
 	Stations.Reset();
 
-	TArray<FText> PlanetNames = {
-		FText::FromString(TEXT("Aethel")), FText::FromString(TEXT("Vornax")),
-		FText::FromString(TEXT("Kaelis")), FText::FromString(TEXT("Theron")),
-		FText::FromString(TEXT("Nyx")), FText::FromString(TEXT("Helios"))
-	};
-
-	TArray<float> OrbitAngles = { 0.0f, 60.0f, 135.0f, 200.0f, 270.0f, 330.0f };
-	TArray<float> OrbitRadii = { 180.0f, 240.0f, 300.0f, 360.0f, 420.0f, 500.0f };
-	TArray<int32> TIRs = { 1, 1, 2, 2, 3, 3 };
-	TArray<int32> FuelCosts = { 100, 150, 200, 280, 350, 500 };
-
-	for (int32 i = 0; i < PlanetNames.Num(); i++)
+	if (NavigationSubsystem)
 	{
-		FOLCPlanetInfo Planet;
-		Planet.PlanetName = PlanetNames[i];
-		Planet.OrbitAngle = OrbitAngles[i];
-		Planet.OrbitRadius = OrbitRadii[i];
-		Planet.Radius = 24.0f + i * 2.0f;
-		Planet.TIR = TIRs[i];
-		Planet.FuelCost = FuelCosts[i];
-		Planet.ScanCost = 10;
-		Planet.bIsCurrentPlanet = (i == 0); // First planet is current location
-		Planets.Add(Planet);
+		Planets = NavigationSubsystem->GetOrGeneratePlanetsForSystem(NavigationSubsystem->GetCurrentSystemID());
+		for (int32 i = 0; i < Planets.Num(); i++)
+			Planets[i].Radius = 24.0f + i * 2.0f;
 	}
 
 	FOLCStationInfo Station1;
 	Station1.StationName = FText::FromString(TEXT("Abandoned Outpost"));
-	Station1.Position = SunPosition + FVector2d(300.0f, -150.0f);
+	Station1.Position = SunPosition + FVector2D(300.0f, -150.0f);
 	Stations.Add(Station1);
 
 	FOLCStationInfo Station2;
 	Station2.StationName = FText::FromString(TEXT("Jump Point Alpha"));
-	Station2.Position = SunPosition + FVector2d(-400.0f, 200.0f);
+	Station2.Position = SunPosition + FVector2D(-400.0f, 200.0f);
 	Stations.Add(Station2);
 }
 
-void UOLCSolarSystemWidget::ScanSelectedPlanet()
+void UOLCSolarSystemWidget::ScanSelectedPlanet(EOLCScanTier Tier)
 {
 	if (SelectedPlanetIndex < 0 || SelectedPlanetIndex >= Planets.Num()) return;
-	if (!ResourceSubsystem) return;
-	if (Planets[SelectedPlanetIndex].bScanned) return;
+	if (!NavigationSubsystem) return;
+	if (bIsScanning) return;
 
-	TArray<FOLCResourceCounterViewData> Resources = ResourceSubsystem->GetResourceCounters();
-	int32 EnergyAvailable = 0;
-	for (const auto& Res : Resources)
-	{
-		if (Res.ResourceType == EOLCResourceType::Energy)
-			EnergyAvailable = FMath::RoundToInt(Res.Value);
-	}
+	const bool bStarted = NavigationSubsystem->StartScan(
+		NavigationSubsystem->GetCurrentSystemID(), SelectedPlanetIndex, Tier);
 
-	if (EnergyAvailable < Planets[SelectedPlanetIndex].ScanCost)
+	if (!bStarted)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Insufficient energy to scan planet: need %d, have %d"),
-			Planets[SelectedPlanetIndex].ScanCost, EnergyAvailable);
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Could not start scan of planet %s at tier %d (insufficient energy or already active)"),
+			*Planets[SelectedPlanetIndex].PlanetName.ToString(), (int32)Tier);
 		return;
 	}
 
-	ResourceSubsystem->AddResource(EOLCResourceType::Energy, -Planets[SelectedPlanetIndex].ScanCost);
-
 	bIsScanning = true;
-	ScanProgress = 0.0f;
-	ScanDuration = 10.0f; // Prototype speed (scaled from 5 min)
+	UE_LOG(LogOLC, Display, TEXT("[OLC] Started scanning planet: %s (tier %d)"),
+		*Planets[SelectedPlanetIndex].PlanetName.ToString(), (int32)Tier);
 
-	UE_LOG(LogTemp, Display, TEXT("[OLC] Started scanning planet: %s (%d energy)"),
-		*Planets[SelectedPlanetIndex].PlanetName.ToString(),
-		Planets[SelectedPlanetIndex].ScanCost);
+	InvalidateLayoutAndVolatility();
+}
+
+void UOLCSolarSystemWidget::HandleScanCompleted(int32 SystemIndex, int32 PlanetIndex, EOLCScanTier Tier)
+{
+	if (!NavigationSubsystem || SystemIndex != NavigationSubsystem->GetCurrentSystemID()) return;
+
+	bIsScanning = false;
+
+	// Refresh from the subsystem's cache — ApplyScanReveal already updated the cached planet in place.
+	Planets = NavigationSubsystem->GetOrGeneratePlanetsForSystem(SystemIndex);
+	for (int32 i = 0; i < Planets.Num(); i++)
+		Planets[i].Radius = 24.0f + i * 2.0f;
+
+	if (PlanetIndex >= 0 && PlanetIndex < Planets.Num())
+	{
+		UE_LOG(LogOLC, Display, TEXT("[OLC] Planet scan completed: %s — Biome: %s, Resources: %s"),
+			*Planets[PlanetIndex].PlanetName.ToString(),
+			*Planets[PlanetIndex].BiomeType.ToString(),
+			*Planets[PlanetIndex].Resources.ToString());
+	}
 
 	InvalidateLayoutAndVolatility();
 }
@@ -588,13 +600,16 @@ void UOLCSolarSystemWidget::NavigateToPlanet()
 	if (SelectedPlanetIndex < 0 || SelectedPlanetIndex >= Planets.Num()) return;
 	if (!ResourceSubsystem) return;
 
+	// Target.FuelCost is sourced from NavigationSubsystem->GetOrGeneratePlanetsForSystem's
+	// deterministic generation (see InitializeSolarSystemData/HandleScanCompleted), not
+	// widget-local arithmetic.
 	const FOLCPlanetInfo& Target = Planets[SelectedPlanetIndex];
 	if (Target.bIsCurrentPlanet) return;
 
 	// Check drive status — offline drive cannot travel.
 	if (ResourceSubsystem->GetDriveStatus() == EOLCModuleState::Offline)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Cannot navigate: drive is OFFLINE"));
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Cannot navigate: drive is OFFLINE"));
 		return;
 	}
 
@@ -602,7 +617,7 @@ void UOLCSolarSystemWidget::NavigateToPlanet()
 	const int32 MaxRange = ResourceSubsystem->GetMaxReachableFuelCost();
 	if (Target.FuelCost > MaxRange)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Cannot navigate: %s is out of range (need %d fuel, max reach: %d)"),
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Cannot navigate: %s is out of range (need %d fuel, max reach: %d)"),
 			*Target.PlanetName.ToString(), Target.FuelCost, MaxRange);
 		return;
 	}
@@ -617,7 +632,7 @@ void UOLCSolarSystemWidget::NavigateToPlanet()
 
 	if (FuelAvailable < Target.FuelCost)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[OLC] Insufficient fuel to navigate: need %d, have %d"),
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] Insufficient fuel to navigate: need %d, have %d"),
 			Target.FuelCost, FuelAvailable);
 		return;
 	}
@@ -628,7 +643,7 @@ void UOLCSolarSystemWidget::NavigateToPlanet()
 		Planet.bIsCurrentPlanet = false;
 	Planets[SelectedPlanetIndex].bIsCurrentPlanet = true;
 
-	UE_LOG(LogTemp, Display, TEXT("[OLC] Navigated to planet: %s (fuel cost: %d)"),
+	UE_LOG(LogOLC, Display, TEXT("[OLC] Navigated to planet: %s (fuel cost: %d)"),
 		*Target.PlanetName.ToString(), Target.FuelCost);
 
 	InvalidateLayoutAndVolatility();

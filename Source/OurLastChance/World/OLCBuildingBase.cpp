@@ -1,8 +1,12 @@
 #include "OLCBuildingBase.h"
+#include "OurLastChance.h"
 
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/TextRenderComponent.h"
 #include "Logging/LogMacros.h"
+#include "NiagaraComponent.h"
+#include "VFX/OLCVFXSubsystem.h"
 
 #define LOCTEXT_NAMESPACE "OLCBuildingBase"
 
@@ -25,6 +29,13 @@ AOLCBuildingBase::AOLCBuildingBase()
 	Footprint->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	Footprint->SetCollisionProfileName(TEXT("BlockAllDynamic"));
 
+	ProductionTextComponent = CreateDefaultSubobject<UTextRenderComponent>(TEXT("ProductionText"));
+	ProductionTextComponent->SetupAttachment(RootComponent);
+	ProductionTextComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 180.0f));
+	ProductionTextComponent->SetHorizontalAlignment(EHTA_Center);
+	ProductionTextComponent->SetWorldSize(32.0f);
+	ProductionTextComponent->SetVisibility(false);
+
 	// Default grid cell size matches crash site prototype (180 units per tile).
 	GridCellSize = 180.0f;
 
@@ -35,7 +46,7 @@ void AOLCBuildingBase::BeginPlay()
 {
 	Super::BeginPlay();
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Building '%s' spawned at %s"),
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Building '%s' spawned at %s"),
 		*BuildingData.DisplayName.ToString(),
 		*GetActorLocation().ToString());
 
@@ -47,7 +58,7 @@ void AOLCBuildingBase::EndPlay(EEndPlayReason::Type EndPlayReason)
 {
 	Super::EndPlay(EndPlayReason);
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Building '%s' ended play (reason=%d)"),
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Building '%s' ended play (reason=%d)"),
 		*BuildingData.DisplayName.ToString(),
 		static_cast<int32>(EndPlayReason));
 }
@@ -63,7 +74,7 @@ void AOLCBuildingBase::SetBuildingData(const FOLCBuildingConfig& InData)
 			BuildingData.GridSize.Y * GridCellSize * 0.5f, 10.0f));
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Building data updated: %s (%dx%d)"),
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Building data updated: %s (%dx%d)"),
 		*BuildingData.DisplayName.ToString(),
 		FMath::RoundToInt(BuildingData.GridSize.X),
 		FMath::RoundToInt(BuildingData.GridSize.Y));
@@ -83,7 +94,7 @@ void AOLCBuildingBase::SnapToGrid()
 
 	SetActorLocation(FVector(GridX, GridY, GridZ));
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Building snapped to grid: %s"), *GetActorLocation().ToString());
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Building snapped to grid: %s"), *GetActorLocation().ToString());
 }
 
 void AOLCBuildingBase::RotateBuild()
@@ -91,9 +102,17 @@ void AOLCBuildingBase::RotateBuild()
 	BuildRotationDegrees = (BuildRotationDegrees + 90) % 360;
 	SetActorRotation(FRotator(0.0f, static_cast<float>(BuildRotationDegrees), 0.0f));
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Building '%s' rotated to %d degrees"),
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Building '%s' rotated to %d degrees"),
 		*BuildingData.DisplayName.ToString(),
 		BuildRotationDegrees);
+}
+
+void AOLCBuildingBase::ShowProduction(const FText& ProductionText, bool bDeficit)
+{
+	if (!ProductionTextComponent) return;
+	ProductionTextComponent->SetText(ProductionText);
+	ProductionTextComponent->SetTextRenderColor(bDeficit ? FColor(239, 68, 68) : FColor(34, 197, 94));
+	ProductionTextComponent->SetVisibility(!ProductionText.IsEmpty());
 }
 
 void AOLCBuildingBase::SetPowered(bool bNewPowered)
@@ -108,9 +127,62 @@ void AOLCBuildingBase::SetPowered(bool bNewPowered)
 		Mesh->SetVisibility(bIsPowered, true);
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Building '%s' powered: %s"),
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Building '%s' powered: %s"),
 		*BuildingData.DisplayName.ToString(),
 		bIsPowered ? TEXT("ON") : TEXT("OFF"));
+}
+
+// ---------------------------------------------------------------------------
+// VFX integration hooks (WP-126 step-7; append-only)
+// ---------------------------------------------------------------------------
+
+void AOLCBuildingBase::PlayDestructionVFX()
+{
+	if (UOLCVFXSubsystem* VFX = GetGameInstance()->GetSubsystem<UOLCVFXSubsystem>())
+	{
+		VFX->PlayBuildingDestruction(GetActorLocation());
+	}
+	else
+	{
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] PlayDestructionVFX: VFX subsystem unavailable — no-op."));
+	}
+}
+
+void AOLCBuildingBase::StartConstructionGlow()
+{
+	if (ConstructionGlow)
+	{
+		return; // Already active.
+	}
+
+	UOLCVFXSubsystem* VFX = GetGameInstance()->GetSubsystem<UOLCVFXSubsystem>();
+	if (!VFX || !SceneRoot)
+	{
+		UE_LOG(LogOLC, Warning, TEXT("[OLC] StartConstructionGlow: VFX subsystem or SceneRoot unavailable — no-op."));
+		return;
+	}
+
+	ConstructionGlow = VFX->PlayBuildingConstructionGlow(SceneRoot);
+
+	// Diagnostic: make the attach observable in PIE logs (WP-126 step-7 verification).
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Building '%s' construction glow %s"),
+		*BuildingData.DisplayName.ToString(),
+		ConstructionGlow ? TEXT("attached") : TEXT("FAILED to attach"));
+}
+
+void AOLCBuildingBase::StopConstructionGlow()
+{
+	if (!ConstructionGlow)
+	{
+		return; // Nothing to stop.
+	}
+
+	ConstructionGlow->DestroyComponent();
+	ConstructionGlow = nullptr;
+
+	// Diagnostic: make the detach observable in PIE logs (WP-126 step-7 verification).
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Building '%s' construction glow detached"),
+		*BuildingData.DisplayName.ToString());
 }
 
 #undef LOCTEXT_NAMESPACE

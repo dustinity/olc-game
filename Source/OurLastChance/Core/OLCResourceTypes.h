@@ -1,6 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+
+class UOLCBuildingData;
 #include "UObject/NoExportTypes.h"
 #include "OLCResourceTypes.generated.h"
 
@@ -382,6 +384,9 @@ struct FOLCBuildCardViewData
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|UI")
 	bool bSelected = false;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "OLC|UI")
+	TObjectPtr<UOLCBuildingData> SourceData = nullptr;
 
 	FOLCBuildCardViewData() : GridSize(2.0f, 2.0f) {}
 };

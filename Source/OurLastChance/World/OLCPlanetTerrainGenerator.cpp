@@ -37,7 +37,7 @@ void UOLCPlanetTerrainGenerator::GenerateTerrain(const FOLCTerrainGenerationSett
 			{
 				Tile.Role = EOLCTerrainTileRole::Water;
 			}
-			else if (Tile.Height > 0.78f || TileNoise(Settings, X, Y, 31) < BlockerDensity)
+			else if (Tile.Height > 0.78f || SmoothNoise(Settings, X, Y, 31, 2) < (0.34f + BlockerDensity * 0.5f))
 			{
 				Tile.Role = EOLCTerrainTileRole::Blocked;
 			}

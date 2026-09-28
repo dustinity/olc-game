@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "Combat/OLCWeaponData.h"
 #include "Core/OLCResourceTypes.h"
 #include "OLCBuildingData.generated.h"
 
@@ -46,6 +47,10 @@ struct FOLCBuildingConfig
 {
 	GENERATED_BODY()
 
+	/** Stable id used for systems that key off a building type (e.g. animation-set matching). Empty = unset. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|Building")
+	FString BuildingId;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|Building")
 	FText DisplayName;
 
@@ -72,6 +77,9 @@ struct FOLCBuildingConfig
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|Building")
 	TArray<FOLCBiomeModifier> BiomeModifiers;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|Building|Weapons")
+	TArray<FOLCTurretMountConfig> TurretMounts;
 
 	float GetBiomeMultiplier(EOLCBiomeType Biome) const
 	{
@@ -100,6 +108,10 @@ public:
 	// -----------------------------------------------------------------------
 	// Stats
 	// -----------------------------------------------------------------------
+	/** Stable id used for systems that key off a building type (e.g. animation-set matching). Empty = unset. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|Building")
+	FString BuildingId;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|Building")
 	FText DisplayName;
 
@@ -131,9 +143,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|Building")
 	TArray<FOLCBiomeModifier> BiomeModifiers;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OLC|Building|Weapons")
+	TArray<FOLCTurretMountConfig> TurretMounts;
+
 	// -----------------------------------------------------------------------
 	// Helper: get multiplier for a given biome (default 1.0f)
 	// -----------------------------------------------------------------------
+	UFUNCTION(BlueprintPure, Category = "OLC|Building")
+	FOLCBuildingConfig ToConfig() const
+	{
+		FOLCBuildingConfig Config;
+		Config.BuildingId = BuildingId;
+		Config.DisplayName = DisplayName;
+		Config.Category = Category;
+		Config.GridSize = GridSize;
+		Config.BuildCost = BuildCost;
+		Config.PowerConsumption = PowerConsumption;
+		Config.OutputPerTick = OutputPerTick;
+		Config.TIRRequirement = TIRRequirement;
+		Config.Description = Description;
+		Config.BiomeModifiers = BiomeModifiers;
+		Config.TurretMounts = TurretMounts;
+		return Config;
+	}
+
 	UFUNCTION(BlueprintPure, Category = "OLC|Building")
 	float GetBiomeMultiplier(EOLCBiomeType Biome) const
 	{

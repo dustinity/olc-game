@@ -1,4 +1,5 @@
 #include "OLCUITestGameMode.h"
+#include "OurLastChance.h"
 
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
@@ -86,7 +87,7 @@ void AOLCUITestGameMode::BeginPlay()
 	if (UOLCUIDataSubsystem* Data = GetUIDataSubsystem())
 	{
 		Data->ResetResourcesToZero();
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Resources reset to 0 for new game start"));
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Resources reset to 0 for new game start"));
 	}
 }
 

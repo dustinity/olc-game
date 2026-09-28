@@ -4,6 +4,7 @@
 // For testing, this actor can be placed directly in any map.
 
 #include "MainMenuMapActor.h"
+#include "OurLastChance.h"
 
 #include "Camera/CameraActor.h"
 #include "Components/DirectionalLightComponent.h"
@@ -42,5 +43,5 @@ void AMainMenuMapActor::BeginPlay()
 		GetWorld()->SpawnActor<APlayerStart>(GetActorLocation(), GetActorRotation());
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[OLC] MainMenuMapActor initialized — lighting and spawn ready"));
+	UE_LOG(LogOLC, Log, TEXT("[OLC] MainMenuMapActor initialized — lighting and spawn ready"));
 }

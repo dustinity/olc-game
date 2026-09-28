@@ -61,7 +61,7 @@ private:
 	TArray<FOLCRadialAction> Actions;
 
 	/** Screen position where menu was opened. */
-	FVector2D OpenPosition = FVector2d::ZeroVector;
+	FVector2D OpenPosition = FVector2D::ZeroVector;
 
 	UPROPERTY()
 	TObjectPtr<AOLCMenuPlayerController> MenuPC;

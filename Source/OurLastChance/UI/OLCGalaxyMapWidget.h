@@ -5,6 +5,7 @@
 #include "OLCGalaxyMapWidget.generated.h"
 
 class UOLCUIDataSubsystem;
+class UOLCNavigationSubsystem;
 
 /** A solar system cluster on the galaxy map. */
 USTRUCT()
@@ -14,6 +15,10 @@ struct FOLCGalaxySystem
 
 	UPROPERTY()
 	FText SystemName;
+
+	/** ClusterID from UOLCNavigationSubsystem::GetOrGenerateGalaxyClusters, for TryPayFuelAndTravel. */
+	UPROPERTY()
+	int32 ClusterID = 0;
 
 	/** Position on the galaxy map (0-1 normalized). */
 	UPROPERTY()
@@ -85,17 +90,23 @@ private:
 	/** Build the right-side detail panel for selected system. */
 	TSharedRef<SWidget> BuildDetailPanel();
 
-	/** Initialize sample galaxy data from Briefing specs. */
+	/** Initialize galaxy data via NavigationSubsystem->GetOrGenerateGalaxyClusters/GetWarpRoutes. */
 	void InitializeGalaxyData();
+
+	/** Pay fuel and warp to the selected system via NavigationSubsystem->TryPayFuelAndTravel. */
+	void WarpToSelectedSystem();
 
 	TArray<FOLCGalaxySystem> Systems;
 	TArray<FOLCWarpRoute> Routes;
 
 	int32 SelectedSystemIndex = -1;
 
-	FVector2d CanvasSize = FVector2d(1920.0, 1080.0);
-	FVector2d GalaxyCenter = FVector2d::ZeroVector;
+	FVector2D CanvasSize = FVector2D(1920.0, 1080.0);
+	FVector2D GalaxyCenter = FVector2D::ZeroVector;
 
 	UPROPERTY()
 	TObjectPtr<UOLCUIDataSubsystem> ResourceSubsystem;
+
+	UPROPERTY()
+	TObjectPtr<UOLCNavigationSubsystem> NavigationSubsystem;
 };

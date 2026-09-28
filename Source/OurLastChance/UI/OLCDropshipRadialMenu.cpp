@@ -63,11 +63,11 @@ TSharedRef<SWidget> UOLCDropshipRadialMenu::RebuildWidget()
 		const auto& Action = Actions[i];
 		float Angle = (i * 2.0f * PI / Actions.Num()) - PI / 2.0f; // Start from top
 
-		FVector2d ButtonPos(OpenPosition.X + FMath::Cos(Angle) * Radius,
+		FVector2D ButtonPos(OpenPosition.X + FMath::Cos(Angle) * Radius,
 		                     OpenPosition.Y + FMath::Sin(Angle) * Radius);
 
 		ButtonLayer->AddSlot()
-			.Offset(FMargin((ButtonPos - FVector2d(60.0f, 30.0f)).X, (ButtonPos - FVector2d(60.0f, 30.0f)).Y, 120.0f, 60.0f))
+			.Offset(FMargin((ButtonPos - FVector2D(60.0f, 30.0f)).X, (ButtonPos - FVector2D(60.0f, 30.0f)).Y, 120.0f, 60.0f))
 			[ BuildRadialButton(Action, Angle) ];
 	}
 

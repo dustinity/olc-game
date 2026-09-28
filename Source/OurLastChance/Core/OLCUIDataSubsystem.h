@@ -1,13 +1,45 @@
 #pragma once
 
+// WP-129 Step 2: manual-mining tutorial hook (AddResourceFromManualMining) added here.
+
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Core/OLCShipModuleData.h"
 #include "Core/OLCResourceTypes.h"
 #include "Core/OLCBuildingData.h"
+#include "World/OLCUnitBase.h"
 #include "OLCUIDataSubsystem.generated.h"
 
 class AActor;
+
+// ---------------------------------------------------------------------------
+// Squad deployment payload (WP-119 Step 5) — serialized when the player
+// confirms a squad on the Squad Selection screen (S09). Slot-ordered; slot 0
+// is always the champion. Stored here (not on a GameMode, which doesn't
+// survive a level/GameMode change) so the eventual dungeon-entry/combat-spawn
+// consumer (WP-112/WP-130) can read it after a map transition.
+// ---------------------------------------------------------------------------
+USTRUCT(BlueprintType)
+struct FOLCSquadDeploymentData
+{
+	GENERATED_BODY()
+
+	/** UOLCUnitData::UnitId for each squad member, slot-ordered. */
+	UPROPERTY(BlueprintReadOnly, Category = "OLC|Squad")
+	TArray<FString> UnitIds;
+
+	/** Live unit actor references, slot-ordered, for direct combat spawning while still in the same world. */
+	UPROPERTY(BlueprintReadOnly, Category = "OLC|Squad")
+	TArray<TObjectPtr<AOLCUnitBase>> SquadUnits;
+
+	/** Slot index of the locked champion (always 0 while a champion is present). */
+	UPROPERTY(BlueprintReadOnly, Category = "OLC|Squad")
+	int32 ChampionSlotIndex = 0;
+
+	/** False for a default-constructed/never-deployed payload. */
+	UPROPERTY(BlueprintReadOnly, Category = "OLC|Squad")
+	bool bIsValid = false;
+};
 
 // ---------------------------------------------------------------------------
 // Registered building entry for production tracking (WP-104)
@@ -84,6 +116,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "OLC|UI|Data")
 	const TArray<EOLCConstructionCategory>& GetConstructionCategories() const { return ConstructionCategories; }
 
+	/** True if a registered (placed) building's DisplayName contains NameSubstring (case-insensitive). Used for research building requirements (WP-120 Step 8). */
+	UFUNCTION(BlueprintPure, Category = "OLC|UI|Data")
+	bool HasBuildingNamed(const FString& NameSubstring) const;
+
+	/** Re-evaluate bAvailable for every build card against current research state (unlocks + ring gating). Called once at population and again whenever research completes (WP-120 Steps 5-6). */
+	UFUNCTION(BlueprintCallable, Category = "OLC|UI|Data")
+	void RefreshBuildCardAvailability();
+
 	// -----------------------------------------------------------------------
 	// Badge data (fake - planet biome/hazard info)
 	// -----------------------------------------------------------------------
@@ -114,6 +154,14 @@ public:
 	/** Add a quantity to a resource counter. Used by building production ticks. */
 	UFUNCTION(BlueprintCallable, Category = "OLC|UI|Data")
 	void AddResource(EOLCResourceType ResourceType, float Amount);
+
+	/**
+	 * Manual-mining collection path (WP-129 Step 2). Adds the amount like
+	 * AddResource, then runs the post-collection tutorial check: once total
+	 * Construction Material >= 50, completes CollectMaterials exactly once.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "OLC|UI|Data")
+	void AddResourceFromManualMining(EOLCResourceType ResourceType, float Amount);
 
 	/** Check if we have enough resources for a build cost. Returns true if affordable. */
 	UFUNCTION(BlueprintPure, Category = "OLC|UI|Data")
@@ -328,6 +376,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "OLC|UI|Data")
 	TArray<FOLCResourceAmount> GetModuleRefund(const FOLCShipModuleViewData& Module) const;
 
+	// -----------------------------------------------------------------------
+	// Squad deployment (WP-119 Step 5)
+	// -----------------------------------------------------------------------
+
+	/** Last squad confirmed on the Squad Selection screen (S09). Invalid/empty until a deployment happens. */
+	UFUNCTION(BlueprintPure, Category = "OLC|UI|Data")
+	const FOLCSquadDeploymentData& GetCurrentSquad() const { return CurrentSquad; }
+
+	/** Store the confirmed squad for the next combat spawn (dungeon entry / space travel) to read. */
+	UFUNCTION(BlueprintCallable, Category = "OLC|UI|Data")
+	void SetCurrentSquad(const FOLCSquadDeploymentData& InSquad) { CurrentSquad = InSquad; }
+
 private:
 	// Tutorial state (WP-104 Step 6)
 	UPROPERTY()
@@ -368,7 +428,7 @@ private:
 	void UpdateResourceCounters();
 	void CalculateProductionRates();
 	void CheckPowerDeficit();
-	void ApplyBiomeModifiers(TArray<FOLCResourceAmount>& Outputs, EOLCBiomeType Biome) const;
+	void ApplyBiomeModifiers(TArray<FOLCResourceAmount>& Outputs, EOLCBiomeType Biome, const UOLCBuildingData* BuildingData) const;
 
 	/** Handle power deficit state change. */
 	void OnPowerDeficitStateChanged(bool bNewDeficit);
@@ -421,7 +481,22 @@ private:
 	UFUNCTION(BlueprintPure, Category = "OLC|UI|Data")
 	bool GetBuildingProductionState(AActor* BuildingActor, bool& bIsProducing, bool& bHasPowerDeficit) const;
 
+	// -----------------------------------------------------------------------
+	// Alien Shield Generator (WP-125 Step 1)
+	// -----------------------------------------------------------------------
+
+	/** True when the Alien Shield Generator module is installed and active. */
+	UFUNCTION(BlueprintPure, Category = "OLC|UI|Data")
+	bool IsAlienShieldActive() const { return bAlienShieldActive; }
+
+	/** Set Alien Shield state — called when the module is installed/removed in ShipModuleManagement. */
+	UFUNCTION(BlueprintCallable, Category = "OLC|UI|Data")
+	void SetAlienShieldActive(bool bInActive);
+
 private:
+	UPROPERTY()
+	FOLCSquadDeploymentData CurrentSquad;
+
 	void PopulateFakeResources();
 	void PopulateFakeMissionObjectives();
 	void PopulateFakeBuildCards();
@@ -452,4 +527,7 @@ private:
 
 	// +200 per resource type from each storage module installed
 	int32 StorageBonusPerResourceType = 0;
+
+	/** WP-125: Alien Shield Generator active (immune to Kinetic, halved Energy). */
+	bool bAlienShieldActive = false;
 };

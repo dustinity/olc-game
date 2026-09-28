@@ -27,7 +27,7 @@ namespace TechTreeAssetPath
 	FString Base()
 	{
 		return FPaths::ConvertRelativePathToFull(
-			FPaths::ProjectDir() / TEXT("../../UE5/Assets/UI/Research Tech Tree/Assets"));
+			FPaths::ProjectDir() / TEXT("../../../Assets/UI/Research Tech Tree/Assets"));
 	}
 
 	FString CategoryIcon(int32 Index)

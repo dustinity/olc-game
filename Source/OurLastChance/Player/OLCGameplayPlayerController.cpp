@@ -1,11 +1,14 @@
 #include "OLCGameplayPlayerController.h"
+#include "OurLastChance.h"
 
 #include "World/OLCUnitBase.h"
 #include "World/OLCGroundUnit.h"
 #include "Kismet/GameplayStatics.h"
 #include "Logging/LogMacros.h"
 #include "Core/OLCUIDataSubsystem.h"
+#include "Core/OLCNavigationSubsystem.h"
 #include "UI/OLCHUDWidgets.h"
+#include "UI/OLCSharedWidgets.h"
 #include "UI/OLCShipBuilderWidget.h"
 #include "Blueprint/UserWidget.h"
 #include "World/OLCPlanetTerrainActor.h"
@@ -37,6 +40,15 @@ void AOLCGameplayPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
 
+	// Per-frame driver for the navigation subsystem's scan timer.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UOLCNavigationSubsystem* NavSub = GI->GetSubsystem<UOLCNavigationSubsystem>())
+		{
+			NavSub->TickScans(DeltaTime);
+		}
+	}
+
 	if (FMath::IsNearlyZero(CameraMoveX) && FMath::IsNearlyZero(CameraMoveY))
 	{
 		return;
@@ -66,6 +78,9 @@ void AOLCGameplayPlayerController::SetupInputComponent()
 
 	// WP-107 Step 5: F1 - Toggle main HUD overlay
 	InputComponent->BindKey(EKeys::F1, IE_Pressed, this, &AOLCGameplayPlayerController::OnToggleMainHUD);
+
+	// H - Toggle keymap / controls reference.
+	InputComponent->BindKey(EKeys::H, IE_Pressed, this, &AOLCGameplayPlayerController::OnToggleKeymap);
 
 	// Left click - Select unit (raycast) or confirm build in construction mode
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &AOLCGameplayPlayerController::OnLeftClick);
@@ -100,11 +115,19 @@ void AOLCGameplayPlayerController::OnRotateBuild()
 			Construction->RotateBuild();
 		}
 	}
-	UE_LOG(LogTemp, Log, TEXT("[OLC] Build rotation requested"));
+	UE_LOG(LogOLC, Log, TEXT("[OLC] Build rotation requested"));
 }
 
 void AOLCGameplayPlayerController::OnCancelBuild()
 {
+	if (KeymapWidget)
+	{
+		KeymapWidget->RemoveFromParent();
+		KeymapWidget = nullptr;
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Keymap closed"));
+		return;
+	}
+
 	if (bIsInConstructionMode)
 	{
 		bIsInConstructionMode = false;
@@ -119,7 +142,7 @@ void AOLCGameplayPlayerController::OnCancelBuild()
 		}
 
 		ActiveHUDWidget = nullptr;
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Construction mode cancelled"));
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Construction mode cancelled"));
 	}
 }
 
@@ -142,7 +165,7 @@ void AOLCGameplayPlayerController::OnToggleConstructionMode()
 	{
 		Construction->AddToViewport(100);
 		ActiveHUDWidget = Construction;
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Construction mode opened"));
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Construction mode opened"));
 	}
 }
 
@@ -153,7 +176,7 @@ void AOLCGameplayPlayerController::OnToggleShipBuilder()
 		ActiveHUDWidget->RemoveFromParent();
 		ActiveHUDWidget = nullptr;
 		bIsInConstructionMode = false;
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Ship builder closed"));
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Ship builder closed"));
 		return;
 	}
 
@@ -162,7 +185,7 @@ void AOLCGameplayPlayerController::OnToggleShipBuilder()
 		bIsInConstructionMode = false;
 		ShipBuilder->AddToViewport(100);
 		ActiveHUDWidget = ShipBuilder;
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Ship builder opened"));
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Ship builder opened"));
 	}
 }
 
@@ -180,6 +203,42 @@ void AOLCGameplayPlayerController::OnToggleSimulationSpeed()
 // ---------------------------------------------------------------------------
 // WP-107 Step 5: F1 HUD toggle + minimap click-to-pan
 // ---------------------------------------------------------------------------
+void AOLCGameplayPlayerController::OnToggleKeymap()
+{
+	if (KeymapWidget)
+	{
+		KeymapWidget->RemoveFromParent();
+		KeymapWidget = nullptr;
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Keymap closed"));
+		return;
+	}
+
+	if (UOLCKeymapWidget* Keymap = CreateWidget<UOLCKeymapWidget>(this, UOLCKeymapWidget::StaticClass()))
+	{
+		const FVector2D KeymapSize(820.0f, 610.0f);
+		int32 ViewportX = 1280;
+		int32 ViewportY = 720;
+		GetViewportSize(ViewportX, ViewportY);
+		if (ViewportX <= 0 || ViewportY <= 0)
+		{
+			ViewportX = 1280;
+			ViewportY = 720;
+		}
+
+		const FVector2D KeymapPosition(
+			FMath::Max(0.0f, (static_cast<float>(ViewportX) - KeymapSize.X) * 0.5f),
+			FMath::Max(0.0f, (static_cast<float>(ViewportY) - KeymapSize.Y) * 0.5f));
+
+		Keymap->SetAnchorsInViewport(FAnchors(0.0f, 0.0f));
+		Keymap->SetAlignmentInViewport(FVector2D::ZeroVector);
+		Keymap->SetPositionInViewport(KeymapPosition, false);
+		Keymap->SetDesiredSizeInViewport(KeymapSize);
+		Keymap->AddToViewport(300);
+		KeymapWidget = Keymap;
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Keymap opened"));
+	}
+}
+
 void AOLCGameplayPlayerController::OnToggleMainHUD()
 {
 	if (bIsMainHUDVisible)
@@ -191,7 +250,7 @@ void AOLCGameplayPlayerController::OnToggleMainHUD()
 			MainHUDWidget = nullptr;
 		}
 		bIsMainHUDVisible = false;
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Main HUD closed"));
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Main HUD closed"));
 		return;
 	}
 
@@ -204,7 +263,7 @@ void AOLCGameplayPlayerController::OnToggleMainHUD()
 
 		// Wire minimap click-to-pan: when minimap is clicked, pan camera to that location
 		// This is handled by the HUD widget's internal Slate click handler
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Main HUD opened"));
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Main HUD opened"));
 	}
 }
 
@@ -228,7 +287,7 @@ void AOLCGameplayPlayerController::OnMinimapClick(FVector2D MinimapCoord)
 	{
 		FVector CameraTarget = WorldPos + FVector(0.0f, 0.0f, 500.0f); // Offset above ground
 		ControlledPawn->SetActorLocation(CameraTarget, false, nullptr, ETeleportType::None);
-		UE_LOG(LogTemp, Log, TEXT("[OLC] Camera panned to minimap click: Tile(%d,%d) World(%.0f,%.0f,%.0f)"),
+		UE_LOG(LogOLC, Log, TEXT("[OLC] Camera panned to minimap click: Tile(%d,%d) World(%.0f,%.0f,%.0f)"),
 			TileX, TileY, WorldPos.X, WorldPos.Y, WorldPos.Z);
 	}
 }
@@ -274,7 +333,7 @@ void AOLCGameplayPlayerController::OnLeftClick()
 			SelectedUnit = Unit;
 			SelectedUnit->SetSelected(true);
 
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Selected unit '%s'"),
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Selected unit '%s'"),
 				Unit->GetUnitData() ? *Unit->GetUnitData()->DisplayName.ToString() : TEXT("Unknown"));
 			return;
 		}
@@ -317,7 +376,7 @@ void AOLCGameplayPlayerController::OnRightClickCapture()
 			{
 				GroundUnit->MoveTo(Hit.Location);
 			}
-			UE_LOG(LogTemp, Log, TEXT("[OLC] Selected unit moving to %s"), *Hit.Location.ToString());
+			UE_LOG(LogOLC, Log, TEXT("[OLC] Selected unit moving to %s"), *Hit.Location.ToString());
 		}
 	}
 }
